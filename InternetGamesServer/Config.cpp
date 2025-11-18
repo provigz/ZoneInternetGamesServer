@@ -17,6 +17,7 @@ Config::Config() :
 	logPingMessages(false),
 	numConnectionsPerIP(0),
 	skipLevelMatching(false),
+	allowSinglePlayer(true),
 	disableXPAdBanner(false),
 	bannedIPs()
 {
@@ -86,6 +87,11 @@ Config::Load(const std::string& file)
 			skipLevelMatching = *elSkipLevelMatching->GetText() == '1';
 	}
 	{
+		tinyxml2::XMLElement* elAllowSinglePlayer = elRoot->FirstChildElement("AllowSinglePlayer");
+		if (elAllowSinglePlayer && elAllowSinglePlayer->GetText())
+			allowSinglePlayer = *elAllowSinglePlayer->GetText() == '1';
+	}
+	{
 		tinyxml2::XMLElement* elDisableXPAdBanner = elRoot->FirstChildElement("DisableXPAdBanner");
 		if (elDisableXPAdBanner && elDisableXPAdBanner->GetText())
 			disableXPAdBanner = *elDisableXPAdBanner->GetText() == '1';
@@ -117,6 +123,7 @@ Config::Save()
 	NewElementWithText(elRoot, "LogPingMessages", logPingMessages ? "1" : "0");
 	NewElementWithText(elRoot, "NumConnectionsPerIP", numConnectionsPerIP);
 	NewElementWithText(elRoot, "SkipLevelMatching", skipLevelMatching ? "1" : "0");
+	NewElementWithText(elRoot, "AllowSinglePlayer", allowSinglePlayer ? "1" : "0");
 	NewElementWithText(elRoot, "DisableXPAdBanner", disableXPAdBanner ? "1" : "0");
 
 	tinyxml2::XMLElement* elBannedIPs = doc.NewElement("BannedIPs");
@@ -135,9 +142,10 @@ Config::Save()
 const std::initializer_list<std::pair<std::string, std::string>> Config::s_optionKeys = {
 	{ "port", "The port the server should be hosted on. Requires restart to apply. (Default: 28805)" },
 	{ "logdir", "The directory where log files are written to. Set to 0 to disable logging. Requires restart to fully apply. (Default: \"InternetGamesServer_logs\")" },
-	{ "logping", "Log empty ping messages from socket. Aimed towards debugging. Value can only be 0 or 1. (Default: 0)" },
+	{ "logping", "Log empty ping messages from Windows 7 clients. Aimed towards debugging. Value can only be 0 or 1. (Default: 0)" },
 	{ "numconnsip", "Limits the number of connections allowed from a given IP address. Maximum is 65535. 0 signifies no limit. NOTE: Make this 0 or higher than 1 to keep XP ad banner functionality! (Default: 0)" },
 	{ "skiplevel", "Do not match players in matches based on skill level. Value can only be 0 or 1. (Default: 0)" },
+	{ "singleplayer", "Allow matches, which support computer players, to exist with only one real player. (Default: 1)" },
 	{ "disablead", "Prevent the server from responding to ad banner requests from Windows XP games with a custom \"Powered by ZoneInternetGamesServer\" banner. Value can only be 0 or 1. (Default: 0)" }
 };
 
@@ -154,6 +162,8 @@ Config::GetValue(const std::string& key) const
 		return std::to_string(numConnectionsPerIP);
 	if (key == "skiplevel")
 		return skipLevelMatching ? "1" : "0";
+	if (key == "singleplayer")
+		return allowSinglePlayer ? "1" : "0";
 	if (key == "disablead")
 		return disableXPAdBanner ? "1" : "0";
 	throw std::runtime_error("Invalid option key!");
@@ -162,7 +172,7 @@ Config::GetValue(const std::string& key) const
 void
 Config::SetValue(const std::string& key, const std::string& value)
 {
-#define CONFIG_SET_BOOL_VALUE(var) (value == "1" ? true : (value == "0" ? false : var))
+#define CONFIG_SET_BOOL_VALUE(var) var = (value == "1" ? true : (value == "0" ? false : var))
 
 	if (key == "port")
 	{
@@ -186,7 +196,7 @@ Config::SetValue(const std::string& key, const std::string& value)
 		logsDirectory = value;
 	}
 	else if (key == "logping")
-		logPingMessages = CONFIG_SET_BOOL_VALUE(logPingMessages);
+		CONFIG_SET_BOOL_VALUE(logPingMessages);
 	else if (key == "numconnsip")
 	{
 		try
@@ -199,9 +209,11 @@ Config::SetValue(const std::string& key, const std::string& value)
 		}
 	}
 	else if (key == "skiplevel")
-		skipLevelMatching = CONFIG_SET_BOOL_VALUE(skipLevelMatching);
+		CONFIG_SET_BOOL_VALUE(skipLevelMatching);
+	else if (key == "singleplayer")
+		CONFIG_SET_BOOL_VALUE(allowSinglePlayer);
 	else if (key == "disablead")
-		disableXPAdBanner = CONFIG_SET_BOOL_VALUE(disableXPAdBanner);
+		CONFIG_SET_BOOL_VALUE(disableXPAdBanner);
 	else
 		throw std::runtime_error("Invalid option key!");
 

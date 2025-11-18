@@ -27,7 +27,8 @@ namespace Hearts {
 enum
 {
 	MessageStartGame = 256,
-	MessageStartHand = 258,
+	MessageReplacePlayer,
+	MessageStartHand,
 	MessageStartPlay,
 	MessageEndHand,
 	MessageEndGame,
@@ -123,6 +124,27 @@ struct MsgChatMessage final
 	{
 		NETWORK_ENDIAN_LONG(userID)
 		NETWORK_ENDIAN_SHORT(messageLength)
+	}
+};
+
+struct MsgReplacePlayer final
+{
+	uint32 userIDNew = 0;
+	int16 seat = 0;
+
+private:
+	int16 _unused = 0;
+
+public:
+	void ConvertToHostEndian()
+	{
+		HOST_ENDIAN_LONG(userIDNew)
+		HOST_ENDIAN_SHORT(seat)
+	}
+	void ConvertToNetworkEndian()
+	{
+		NETWORK_ENDIAN_LONG(userIDNew)
+		NETWORK_ENDIAN_SHORT(seat)
 	}
 };
 
@@ -291,6 +313,14 @@ static std::ostream& operator<<(std::ostream& out, const MsgChatMessage& m)
 		<< "  userID = " << m.userID
 		<< "  seat = " << m.seat
 		<< "  messageLength = " << m.messageLength;
+}
+
+static std::ostream& operator<<(std::ostream& out, const MsgReplacePlayer& m)
+{
+	out << "Hearts::MsgReplacePlayer:";
+	return out
+		<< "  userIDNew = " << m.userIDNew
+		<< "  seat = " << m.seat;
 }
 
 static std::ostream& operator<<(std::ostream& out, const MsgStartHand& m)

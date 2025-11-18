@@ -326,6 +326,13 @@ SpadesMatch::ProcessEvent(const tinyxml2::XMLElement& elEvent, const PlayerSocke
 }
 
 
+void
+SpadesMatch::OnReplacePlayer(const PlayerSocket& player)
+{
+	// TODO
+}
+
+
 std::vector<std::string>
 SpadesMatch::ConstructGameStartMessagesXML(const PlayerSocket& caller) const
 {

@@ -14,15 +14,21 @@ public:
 	SpadesMatch(unsigned int index, PlayerSocket& player);
 
 	int8_t GetRequiredPlayerCount() const override { return SpadesNumPlayers; }
+	bool SupportsComputerPlayers() const override { return true; }
+
 	Game GetGame() const override { return Game::SPADES; }
 
 protected:
 	/** Processing messages */
 	void ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type) override;
 
+	void OnReplacePlayer(const PlayerSocket& player, uint32 userIDNew) override;
+
 private:
 	void Reset();
 	void ResetHand();
+
+	void RegisterCheckIn(int16 seat);
 
 private:
 	typedef int8_t Card;

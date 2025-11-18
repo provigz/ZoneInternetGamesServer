@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "PlayerSocket.hpp"
+#include "../Config.hpp"
 
 namespace WinXP {
 
@@ -67,8 +68,6 @@ Match::StateToString(Match::State state)
 	{
 		case STATE_WAITINGFORPLAYERS:
 			return "STATE_WAITINGFORPLAYERS";
-		case STATE_PENDINGSTART:
-			return "STATE_PENDINGSTART";
 		case STATE_PLAYING:
 			return "STATE_PLAYING";
 		case STATE_GAMEOVER:
@@ -88,6 +87,7 @@ Match::Match(unsigned int index, PlayerSocket& player) :
 	m_state(STATE_WAITINGFORPLAYERS),
 	m_skillLevel(player.GetSkillLevel()),
 	m_mutex(CreateMutex(nullptr, false, nullptr)),
+	m_playerComputerIDs({}),
 	m_endTime(0)
 {
 	JoinPlayer(player);
@@ -140,10 +140,6 @@ Match::JoinPlayer(PlayerSocket& player)
 	for (PlayerSocket* p : m_players)
 		p->OnMatchGenericMessage<MessageServerStatus>(msgServerStatus);
 
-	// Switch state, if enough players have joined
-	if (m_players.size() == GetRequiredPlayerCount())
-		m_state = STATE_PENDINGSTART;
-
 	if (!ReleaseMutex(m_mutex))
 		throw std::runtime_error("WinXP::Match::JoinPlayer(): Couldn't release mutex: " + std::to_string(GetLastError()));
 }
@@ -174,36 +170,50 @@ Match::DisconnectedPlayer(PlayerSocket& player)
 	{
 		MsgServerStatus msgServerStatus;
 		msgServerStatus.playersWaiting = static_cast<int>(m_players.size());
-		for (PlayerSocket* p : m_players)
-			p->OnMatchGenericMessage<MessageServerStatus>(msgServerStatus);
+		BroadcastGenericMessage<MessageServerStatus>(msgServerStatus);
 	}
-#if MATCH_NO_DISCONNECT_ON_PLAYER_LEAVE
-	else if (
-#else
-	else if (m_state == STATE_PLAYING ||
-#endif
-		// If the game has already ended, notify all players that someone has left the match and "Play Again" is now impossible
-		(m_state == STATE_GAMEOVER && m_players.size() == GetRequiredPlayerCount() - 1))
+	// Originally, servers replaced players who have left the game with computer (AI) players.
+	// Based on the game, either replace with computer player, or end the game directly by disconnecting everyone.
+	else if (m_state == STATE_PLAYING || m_state == STATE_GAMEOVER)
 	{
-		SessionLog() << "[MATCH] " << m_guid << ": A player left, closing match!" << std::endl;
-
-		for (PlayerSocket* p : m_players)
+		if ((g_config.allowSinglePlayer || m_players.size() > 1) && SupportsComputerPlayers())
 		{
-			try
-			{
-				p->OnMatchDisconnect();
-			}
-			catch (const std::exception& err)
-			{
-				SessionLog() << "[MATCH] " << m_guid
-					<< ": Couldn't disconnect socket from this match! Disconnecting from server instead. Error: "
-					<< err.what() << std::endl;
-				p->Disconnect();
-			}
-		}
-		m_players.clear();
+			const uint32 userID = std::uniform_int_distribution<uint32>{}(g_rng);
 
-		m_state = STATE_ENDED;
+			MsgPlayerReplaced msgPlayerReplaced;
+			msgPlayerReplaced.userIDOld = player.GetID();
+			msgPlayerReplaced.userIDNew = userID;
+			BroadcastGenericMessage<MessagePlayerReplaced>(msgPlayerReplaced);
+
+			OnReplacePlayer(player, userID);
+
+			m_playerSeatsComputer[player.m_seat] = true;
+			m_playerComputerIDs[player.m_seat] = userID;
+		}
+#if not MATCH_NO_DISCONNECT_ON_PLAYER_LEAVE
+		else
+		{
+			SessionLog() << "[MATCH] " << m_guid << ": A player left, closing match!" << std::endl;
+
+			for (PlayerSocket* p : m_players)
+			{
+				try
+				{
+					p->OnMatchDisconnect();
+				}
+				catch (const std::exception& err)
+				{
+					SessionLog() << "[MATCH] " << m_guid
+						<< ": Couldn't disconnect socket from this match! Disconnecting from server instead. Error: "
+						<< err.what() << std::endl;
+					p->Disconnect();
+				}
+			}
+			m_players.clear();
+
+			m_state = STATE_ENDED;
+		}
+#endif
 	}
 
 	if (!ReleaseMutex(m_mutex))
@@ -216,11 +226,12 @@ Match::Update()
 {
 	switch (m_state)
 	{
-		case STATE_PENDINGSTART:
+		case STATE_WAITINGFORPLAYERS:
 		{
 			// Start the game, if all players are waiting for opponents
-			if (std::all_of(m_players.begin(), m_players.end(),
-				[](const auto& player) { return player->GetState() == PlayerSocket::STATE_WAITINGFOROPPONENTS; }))
+			if (m_players.size() == GetRequiredPlayerCount() &&
+				std::all_of(m_players.begin(), m_players.end(),
+					[](const auto& player) { return player->GetState() == PlayerSocket::STATE_WAITINGFOROPPONENTS; }))
 			{
 				// Distribute unique IDs for each player, starting from 0
 				const int playerCount = static_cast<int>(m_players.size());
@@ -240,8 +251,6 @@ Match::Update()
 		{
 			if (m_endTime != 0)
 			{
-				assert(m_players.size() == GetRequiredPlayerCount());
-
 				SessionLog() << "[MATCH] " << m_guid << ": Playing state restored, cancelling game over close timer." << std::endl;
 				m_endTime = 0;
 			}

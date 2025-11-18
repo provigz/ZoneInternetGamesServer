@@ -33,7 +33,6 @@ struct MsgServerStatus final
 	uint32 playersWaiting = 0;
 };
 
-
 struct MsgUserInfoResponse final
 {
 	uint32 ID = 0;
@@ -59,7 +58,7 @@ struct MsgGameStart final
 		bool chatEnabled = false;
 		int16 skill = 0;
 	};
-	User users[XPMaxMatchPlayers];
+	User users[MATCH_MAX_PLAYERS];
 };
 
 
@@ -75,6 +74,12 @@ struct MsgChatSwitch final
 {
 	uint32 userID = 0;
 	bool chatEnabled = false;
+};
+
+struct MsgPlayerReplaced final
+{
+	uint32 userIDOld = 0;
+	uint32 userIDNew = 0;
 };
 
 
@@ -157,6 +162,14 @@ static std::ostream& operator<<(std::ostream& out, const MsgChatSwitch& m)
 	return out
 		<< "  userID = " << m.userID
 		<< "  chatEnabled = " << m.chatEnabled;
+}
+
+static std::ostream& operator<<(std::ostream& out, const MsgPlayerReplaced& m)
+{
+	out << "MsgPlayerReplaced:";
+	return out
+		<< "  userIDOld = " << m.userIDOld
+		<< "  userIDNew = " << m.userIDNew;
 }
 
 static std::ostream& operator<<(std::ostream& out, const MsgStateTransaction& m)

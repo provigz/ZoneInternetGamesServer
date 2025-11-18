@@ -17,6 +17,7 @@ public:
 
 	Game GetGame() const override { return Game::SPADES; }
 	int8_t GetRequiredPlayerCount() const override { return 4; }
+	bool SupportsComputerPlayers() const override { return true; }
 
 	std::vector<std::string> ConstructGameStartMessagesXML(const PlayerSocket& caller) const override;
 
@@ -25,6 +26,8 @@ protected:
 	bool IsValidChatNudgeMessage(const std::string& msg) const override;
 
 	std::vector<QueuedEvent> ProcessEvent(const tinyxml2::XMLElement& elEvent, const PlayerSocket& caller) override;
+
+	void OnReplacePlayer(const PlayerSocket& player) override;
 
 private:
 	void ResetHand();

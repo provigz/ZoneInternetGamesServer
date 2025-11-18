@@ -20,6 +20,3 @@ typedef long int32;
 
 #define XPRoomProtocolSignature 0x64756465
 #define XPRoomClientVersion 1
-
-
-#define XPMaxMatchPlayers 4

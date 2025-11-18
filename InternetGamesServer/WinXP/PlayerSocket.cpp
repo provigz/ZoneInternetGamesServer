@@ -224,7 +224,7 @@ PlayerSocket::OnGameStart(const std::vector<PlayerSocket*>& matchPlayers)
 	m_state = STATE_STARTING_GAME;
 
 	SendGenericMessage<MessageGameStart>(std::move(msgGameStart),
-		sizeof(MsgGameStart) - sizeof(MsgGameStart::User) * (XPMaxMatchPlayers - totalPlayerCount));
+		sizeof(MsgGameStart) - sizeof(MsgGameStart::User) * (MATCH_MAX_PLAYERS - totalPlayerCount));
 
 	// The match can now send game messages to this client - game start messages have been sent
 	m_state = STATE_PLAYING;

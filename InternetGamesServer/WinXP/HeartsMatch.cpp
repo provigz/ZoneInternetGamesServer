@@ -177,6 +177,45 @@ HeartsMatch::ResetHand()
 			allCards.begin() + (i + 1) * HeartsNumCardsInHand);
 }
 
+void
+HeartsMatch::RegisterCheckIn(int16 seat)
+{
+	using namespace Hearts;
+
+	m_playersCheckedIn[seat] = true;
+	if (ARRAY_EACH_TRUE(m_playersCheckedIn))
+	{
+		m_playersCheckedIn = {};
+		m_matchState = MatchState::PASSING;
+
+		MsgStartGame msgStartGame;
+		for (PlayerSocket* p : m_players)
+		{
+			msgStartGame.playerIDs[p->m_seat] = p->GetID();
+		}
+		if (m_players.size() < HeartsNumPlayers)
+		{
+			for (int16 seat = 0; seat < HeartsNumPlayers; ++seat)
+			{
+				if (m_playerSeatsComputer[seat])
+					msgStartGame.playerIDs[seat] = GetComputerPlayerID(seat);
+			}
+		}
+		BroadcastGameMessage<MessageStartGame>(msgStartGame);
+
+		MsgStartHand msgStartHand;
+		msgStartHand.passDirection = m_passDirection;
+		for (PlayerSocket* player : m_players)
+		{
+			const std::vector<Card>& cards = m_playerCards.at(player->m_seat);
+			for (BYTE y = 0; y < HeartsNumCardsInHand; ++y)
+				msgStartHand.hand[y] = cards[y];
+
+			player->OnMatchGameMessage<MessageStartHand>(msgStartHand);
+		}
+	}
+}
+
 
 void
 HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
@@ -200,28 +239,7 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 			if (msgCheckIn.seat != player.m_seat)
 				throw std::runtime_error("Hearts::MsgCheckIn: Incorrect player seat!");
 
-			m_playersCheckedIn[player.m_seat] = true;
-			if (ARRAY_EACH_TRUE(m_playersCheckedIn))
-			{
-				m_playersCheckedIn = {};
-				m_matchState = MatchState::PASSING;
-
-				MsgStartGame msgStartGame;
-				for (BYTE i = 0; i < 4; ++i)
-					msgStartGame.playerIDs[m_players[i]->m_seat] = m_players[i]->GetID();
-				BroadcastGameMessage<MessageStartGame>(msgStartGame);
-
-				MsgStartHand msgStartHand;
-				msgStartHand.passDirection = m_passDirection;
-				for (PlayerSocket* player : m_players)
-				{
-					const std::vector<Card>& cards = m_playerCards.at(player->m_seat);
-					for (BYTE y = 0; y < HeartsNumCardsInHand; ++y)
-						msgStartHand.hand[y] = cards[y];
-
-					player->OnMatchGameMessage<MessageStartHand>(msgStartHand);
-				}
-			}
+			RegisterCheckIn(player.m_seat);
 			return;
 		}
 		case MatchState::PASSING:
@@ -369,6 +387,22 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 
 							m_matchState = MatchState::ENDED;
 							m_state = STATE_GAMEOVER;
+
+							// Request new game on behalf of computer players
+							if (m_players.size() < HeartsNumPlayers)
+							{
+								MsgNewGameVote msgNewGameVote;
+								for (int16 seat = 0; seat < HeartsNumPlayers; ++seat)
+								{
+									if (m_playerSeatsComputer[seat])
+									{
+										msgNewGameVote.seat = seat;
+										BroadcastGameMessage<MessageNewGameVote>(msgNewGameVote);
+
+										m_playersCheckedIn[seat] = true;
+									}
+								}
+							}
 						}
 						else
 						{
@@ -429,30 +463,7 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 
 				BroadcastGameMessage<MessageNewGameVote>(msgNewGameVote);
 
-				m_playersCheckedIn[player.m_seat] = true;
-				if (ARRAY_EACH_TRUE(m_playersCheckedIn))
-				{
-					m_playersCheckedIn = {};
-					m_state = STATE_PLAYING;
-
-					Reset();
-
-					MsgStartGame msgStartGame;
-					for (BYTE i = 0; i < 4; ++i)
-						msgStartGame.playerIDs[m_players[i]->m_seat] = m_players[i]->GetID();
-					BroadcastGameMessage<MessageStartGame>(msgStartGame);
-
-					MsgStartHand msgStartHand;
-					msgStartHand.passDirection = m_passDirection;
-					for (PlayerSocket* player : m_players)
-					{
-						const std::vector<Card>& cards = m_playerCards.at(player->m_seat);
-						for (BYTE y = 0; y < HeartsNumCardsInHand; ++y)
-							msgStartHand.hand[y] = cards[y];
-
-						player->OnMatchGameMessage<MessageStartHand>(msgStartHand);
-					}
-				}
+				RegisterCheckIn(player.m_seat);
 				return;
 			}
 			break;
@@ -510,6 +521,36 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		}
 		default:
 			throw std::runtime_error("HeartsMatch::ProcessIncomingGameMessageImpl(): Game message of unknown type received: " + std::to_string(type));
+	}
+}
+
+
+void
+HeartsMatch::OnReplacePlayer(const PlayerSocket& player, uint32 userIDNew)
+{
+	using namespace Hearts;
+
+	MsgReplacePlayer msgReplacePlayer;
+	msgReplacePlayer.userIDNew = userIDNew;
+	msgReplacePlayer.seat = player.m_seat;
+	BroadcastGameMessage<MessageReplacePlayer>(msgReplacePlayer);
+
+	switch (m_matchState)
+	{
+		case MatchState::INITIALIZING:
+		{
+			RegisterCheckIn(player.m_seat);
+			break;
+		}
+		case MatchState::ENDED:
+		{
+			MsgNewGameVote msgNewGameVote;
+			msgNewGameVote.seat = player.m_seat;
+			BroadcastGameMessage<MessageNewGameVote>(msgNewGameVote);
+
+			RegisterCheckIn(player.m_seat);
+			break;
+		}
 	}
 }
 

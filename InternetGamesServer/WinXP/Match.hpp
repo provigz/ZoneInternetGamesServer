@@ -37,7 +37,6 @@ public:
 
 	enum State {
 		STATE_WAITINGFORPLAYERS,
-		STATE_PENDINGSTART,
 		STATE_PLAYING,
 		STATE_GAMEOVER,
 		STATE_ENDED
@@ -59,6 +58,8 @@ public:
 	inline SkillLevel GetSkillLevel() const { return m_skillLevel; }
 	inline uint32 GetGameID() const { return m_guid.Data1; }
 
+	inline uint32 GetComputerPlayerID(int16 seat) const { return m_playerComputerIDs.at(seat); }
+
 	/** Processing messages */
 	void ProcessMessage(const MsgChatSwitch& msg);
 	void ProcessIncomingGameMessage(PlayerSocket& player, uint32 type);
@@ -66,6 +67,8 @@ public:
 protected:
 	/** Processing messages */
 	virtual void ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type) = 0;
+
+	virtual void OnReplacePlayer(const PlayerSocket& player, uint32 userIDNew) {}
 
 	// Returns message ID, 0 on failure
 	static uint8_t ValidateChatMessage(const std::wstring& chatMsg, uint8_t customRangeStart, uint8_t customRangeEnd);
@@ -108,6 +111,8 @@ protected:
 private:
 	// Mutex to prevent simultaneous match processes, like adding/removing players and processing messages and removal of the match
 	HANDLE m_mutex;
+
+	std::array<uint32, MATCH_MAX_PLAYERS> m_playerComputerIDs; // IDs of computer players by seat.
 
 	std::time_t m_endTime;
 

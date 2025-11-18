@@ -18,7 +18,8 @@ enum
 {
 	MessageCheckIn = 256,
 	MessageStartGame,
-	MessageStartBid = 259,
+	MessageReplacePlayer,
+	MessageStartBid,
 	MessageStartPlay = 261,
 	MessageEndHand,
 	MessageEndGame,
@@ -104,6 +105,27 @@ public:
 	{
 		NETWORK_ENDIAN_LONG(userID)
 		NETWORK_ENDIAN_SHORT(messageLength)
+	}
+};
+
+struct MsgReplacePlayer final
+{
+	uint32 userIDNew = 0;
+	int16 seat = 0;
+
+private:
+	int16 _unused = 0;
+
+public:
+	void ConvertToHostEndian()
+	{
+		HOST_ENDIAN_LONG(userIDNew)
+		HOST_ENDIAN_SHORT(seat)
+	}
+	void ConvertToNetworkEndian()
+	{
+		NETWORK_ENDIAN_LONG(userIDNew)
+		NETWORK_ENDIAN_SHORT(seat)
 	}
 };
 
@@ -295,9 +317,17 @@ static std::ostream& operator<<(std::ostream& out, const MsgChatMessage& m)
 		<< "  messageLength = " << m.messageLength;
 }
 
+static std::ostream& operator<<(std::ostream& out, const MsgReplacePlayer& m)
+{
+	out << "Spades::MsgReplacePlayer:";
+	return out
+		<< "  userIDNew = " << m.userIDNew
+		<< "  seat = " << m.seat;
+}
+
 static std::ostream& operator<<(std::ostream& out, const MsgStartBid& m)
 {
-	out << "Spades::MsgStartGame:"
+	out << "Spades::MsgStartBid:"
 		<< "  boardNumber = " << m.boardNumber
 		<< "  dealer = " << m.dealer
 		<< "  hand = {";

@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include "PlayerSocket.hpp"
+#include "../Config.hpp"
 #include "../Util.hpp"
 
 namespace Win7 {
@@ -75,8 +76,6 @@ Match::StateToString(Match::State state)
 	{
 		case STATE_WAITINGFORPLAYERS:
 			return "STATE_WAITINGFORPLAYERS";
-		case STATE_PENDINGSTART:
-			return "STATE_PENDINGSTART";
 		case STATE_PLAYING:
 			return "STATE_PLAYING";
 		case STATE_GAMEOVER:
@@ -142,10 +141,6 @@ Match::JoinPlayer(PlayerSocket& player)
 
 	AddPlayer(player);
 
-	// Switch state, if enough players have joined
-	if (m_players.size() == GetRequiredPlayerCount())
-		m_state = STATE_PENDINGSTART;
-
 	if (!ReleaseMutex(m_mutex))
 		throw std::runtime_error("Win7::Match::JoinPlayer(): Couldn't release mutex: " + std::to_string(GetLastError()));
 }
@@ -175,25 +170,34 @@ Match::DisconnectedPlayer(PlayerSocket& player)
 	{
 		m_state = STATE_ENDED;
 	}
-#if not MATCH_NO_DISCONNECT_ON_PLAYER_LEAVE
-	// Originally, servers replaced players who have left the game with AI.
-	// However, since there is no logic support for any of the games on this server currently,
-	// if currently playing a game, we end the game directly by disconnecting everyone.
-	// NOTE: The server doesn't know when a game has finished with a win, so this has the drawback of causing
-	//       an "Error communicating with server" message after a game has finished with a win
-	//       (even though since the game has ended anyway, it's not really important).
+	// Originally, servers replaced players who have left the game with computer (AI) players.
+	// Based on the game, either replace with computer player, or end the game directly by disconnecting everyone.
 	else if (m_state == STATE_PLAYING)
 	{
-		// Set ENDED state before disconnecting players, so that this function no longer executes,
-		// preventing recursion which leads to a segfault when trying to disconnect an already disconnected and destroyed socket.
-		m_state = STATE_ENDED;
+		if ((g_config.allowSinglePlayer || m_players.size() > 1))
+		{
+			const std::string replaceWithAIXML =
+				StateSTag::ConstructMethodMessage("GameManagement", "ReplaceWithAI",
+					std::to_string(player.m_role) + ",");
+			for (PlayerSocket* p : m_players)
+				p->OnEventReceive(replaceWithAIXML);
 
-		// Disconnect any remaining players
-		for (PlayerSocket* p : m_players)
-			p->Disconnect();
-		m_players.clear();
-	}
+			m_playerSeatsComputer[player.m_role] = true;
+		}
+#if not MATCH_NO_DISCONNECT_ON_PLAYER_LEAVE
+		else
+		{
+			// Set ENDED state before disconnecting players, so that this function no longer executes,
+			// preventing recursion which leads to a segfault when trying to disconnect an already disconnected and destroyed socket.
+			m_state = STATE_ENDED;
+
+			// Disconnect any remaining players
+			for (PlayerSocket* p : m_players)
+				p->Disconnect();
+			m_players.clear();
+		}
 #endif
+	}
 
 	if (!ReleaseMutex(m_mutex))
 		throw std::runtime_error("Win7::Match::JoinPlayer(): Couldn't release mutex: " + std::to_string(GetLastError()));
@@ -205,11 +209,12 @@ Match::Update()
 {
 	switch (m_state)
 	{
-		case STATE_PENDINGSTART:
+		case STATE_WAITINGFORPLAYERS:
 		{
 			// Start the game, if all players are waiting for opponents
-			if (std::all_of(m_players.begin(), m_players.end(),
-				[](const auto& player) { return player->GetState() == PlayerSocket::STATE_WAITINGFOROPPONENTS; }))
+			if (m_players.size() == GetRequiredPlayerCount() &&
+				std::all_of(m_players.begin(), m_players.end(),
+					[](const auto& player) { return player->GetState() == PlayerSocket::STATE_WAITINGFOROPPONENTS; }))
 			{
 				// Distribute unique role IDs for each player, starting from 0
 				const int playerCount = static_cast<int>(m_players.size());

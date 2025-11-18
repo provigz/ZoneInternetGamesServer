@@ -37,7 +37,6 @@ public:
 
 	enum State {
 		STATE_WAITINGFORPLAYERS,
-		STATE_PENDINGSTART,
 		STATE_PLAYING,
 		STATE_GAMEOVER,
 		STATE_ENDED
@@ -90,6 +89,8 @@ protected:
 
 	/** Process event and return a custom response. */
 	virtual std::vector<QueuedEvent> ProcessEvent(const tinyxml2::XMLElement& elEvent, const PlayerSocket& caller) = 0;
+
+	virtual void OnReplacePlayer(const PlayerSocket& player) {}
 
 protected:
 	State m_state;

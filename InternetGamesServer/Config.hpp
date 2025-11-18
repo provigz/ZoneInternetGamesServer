@@ -25,11 +25,12 @@ public:
 	USHORT port;
 
 	std::string logsDirectory;
-	bool logPingMessages; // DEBUG: Log empty ping messages from sockets
+	bool logPingMessages; // DEBUG: Log empty ping messages from Windows 7 clients
 
 	USHORT numConnectionsPerIP;
 
-	bool skipLevelMatching; // When searching for a lobby, don't take the match level into account
+	bool skipLevelMatching; // When searching for a lobby, don't take the match level into account.
+	bool allowSinglePlayer; // Allow matches, which support computer players, to exist with only one real player.
 	bool disableXPAdBanner;
 
 	std::set<std::string> bannedIPs;
