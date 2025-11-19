@@ -181,6 +181,13 @@ PlayerSocket::OnDisconnected()
 }
 
 void
+PlayerSocket::OnMatchDisconnect()
+{
+	m_match = nullptr;
+	Disconnect();
+}
+
+void
 PlayerSocket::OnEventReceive(const std::string& xml) const
 {
 	// Send an event receive message

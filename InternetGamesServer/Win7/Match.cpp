@@ -115,7 +115,7 @@ Match::~Match()
 {
 	// Match has ended, so disconnect any remaining players
 	for (PlayerSocket* p : m_players)
-		p->Disconnect();
+		p->OnMatchDisconnect();
 
 	CloseHandle(m_mutex);
 }
@@ -148,9 +148,6 @@ Match::JoinPlayer(PlayerSocket& player)
 void
 Match::DisconnectedPlayer(PlayerSocket& player)
 {
-	if (m_state == STATE_ENDED)
-		return;
-
 	switch (WaitForSingleObject(m_mutex, SOCKET_TIMEOUT_MS + 10000))
 	{
 		case WAIT_OBJECT_0: // Acquired ownership of the mutex
@@ -187,14 +184,12 @@ Match::DisconnectedPlayer(PlayerSocket& player)
 #if not MATCH_NO_DISCONNECT_ON_PLAYER_LEAVE
 		else
 		{
-			// Set ENDED state before disconnecting players, so that this function no longer executes,
-			// preventing recursion which leads to a segfault when trying to disconnect an already disconnected and destroyed socket.
-			m_state = STATE_ENDED;
-
 			// Disconnect any remaining players
 			for (PlayerSocket* p : m_players)
-				p->Disconnect();
+				p->OnMatchDisconnect();
 			m_players.clear();
+
+			m_state = STATE_ENDED;
 		}
 #endif
 	}

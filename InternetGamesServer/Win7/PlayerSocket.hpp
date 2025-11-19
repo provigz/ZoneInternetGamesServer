@@ -26,6 +26,7 @@ public:
 
 	/** Event handling */
 	void OnGameStart();
+	void OnMatchDisconnect();
 	void OnEventReceive(const std::string& xml) const;
 	void OnChat(const StateChatTag* tag);
 
