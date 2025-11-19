@@ -111,6 +111,27 @@ public:
 		return maxRankPlayer;
 	}
 
+	// Not directly related to a card trick.
+	// Is a member of this class so it can leverage types and functions.
+	int8_t GetAutoBid(const std::vector<C>& hand) const
+	{
+		// TODO!
+		return 4;
+	}
+	C GetAutoCard(const std::vector<C>& hand, bool spadesBroken) const
+	{
+		// TODO! This is temporary/unfinished
+		for (C card : hand)
+		{
+			if (!spadesBroken && m_leadCard == UnsetVal && m_getCardSuitFunc(card) == CardSuit::SPADES)
+				continue;
+
+			if (FollowsSuit(card, hand))
+				return card;
+		}
+		return 0;
+	}
+
 private:
 	C m_leadCard;
 	std::array<C, SpadesNumPlayers> m_playerCards;

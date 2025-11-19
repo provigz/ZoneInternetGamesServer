@@ -39,6 +39,7 @@ SpadesMatch::SpadesMatch(unsigned int index, PlayerSocket& player) :
 	m_nextBidPlayer(),
 	m_playerBids(),
 	m_playerCards(),
+	m_spadesBroken(),
 	m_playerTurn(),
 	m_playerTrickTurn(),
 	m_playerTricksTaken(),
@@ -56,6 +57,7 @@ SpadesMatch::ResetHand()
 		m_handDealer = 0;
 	m_nextBidPlayer = m_handDealer;
 
+	m_spadesBroken = false;
 	m_playerBids = { BID_HAND_START, BID_HAND_START, BID_HAND_START, BID_HAND_START };
 	if ((m_playerTurn = m_handDealer + 1) >= 4)
 		m_playerTurn = 0;
@@ -72,6 +74,227 @@ SpadesMatch::ResetHand()
 	for (size_t i = 0; i < m_playerCards.size(); ++i)
 		m_playerCards[i] = CardArray(allCards.begin() + i * SpadesNumCardsInHand,
 			allCards.begin() + (i + 1) * SpadesNumCardsInHand);
+}
+
+
+std::vector<SpadesMatch::QueuedEvent>
+SpadesMatch::ProcessBid(int8_t role, int8_t bid)
+{
+	assert(m_matchState == MatchState::BIDDING);
+
+	if (bid == BID_SHOWN_CARDS)
+	{
+		if (m_playerBids[role] == BID_HAND_START)
+			m_playerBids[role] = BID_SHOWN_CARDS;
+
+		const CardArray& cards = m_playerCards.at(role);
+		return {
+			QueuedEvent(
+				{},
+				StateSTag::ConstructMethodMessage("GameLogic", "DealCards",
+					[&cards](XMLPrinter& printer)
+					{
+						printer.OpenElement("Cards");
+						for (Card card : cards)
+							NewElementWithText(printer, "C", card);
+						printer.CloseElement("Cards");
+					}, true))
+		};
+	}
+
+	bool moreBidsToSend = m_nextBidPlayer != m_handDealer ||
+		std::all_of(m_playerBids.begin(), m_playerBids.end(), [](int bid) { return bid <= BID_SHOWN_CARDS; });
+
+	m_playerBids[role] = bid;
+
+	while (moreBidsToSend && m_playerBids[m_nextBidPlayer] > BID_SHOWN_CARDS)
+	{
+		XMLPrinter sanitizedBidMessage;
+		sanitizedBidMessage.OpenElement("Message");
+		sanitizedBidMessage.OpenElement("Move");
+
+		NewElementWithText(sanitizedBidMessage, "Role", m_nextBidPlayer);
+		NewElementWithText(sanitizedBidMessage, "Bid", m_playerBids[m_nextBidPlayer]);
+
+		sanitizedBidMessage.CloseElement("Move");
+		sanitizedBidMessage.CloseElement("Message");
+
+		for (const PlayerSocket* player : m_players)
+		{
+			if (player->m_role != m_nextBidPlayer)
+				player->OnEventReceive(sanitizedBidMessage);
+		}
+
+		if (++m_nextBidPlayer >= 4)
+			m_nextBidPlayer = 0;
+		moreBidsToSend = m_nextBidPlayer != m_handDealer;
+	}
+
+	std::vector<QueuedEvent> eventQueue;
+	if (bid == BID_DOUBLE_NIL)
+	{
+		const CardArray& cards = m_playerCards.at(role);
+		eventQueue.emplace_back(
+			"",
+			StateSTag::ConstructMethodMessage("GameLogic", "DealCards",
+				[&cards](XMLPrinter& printer)
+				{
+					printer.OpenElement("Cards");
+					for (Card card : cards)
+						NewElementWithText(printer, "C", card);
+					printer.CloseElement("Cards");
+				}, true));
+	}
+	if (!moreBidsToSend)
+	{
+		m_matchState = MatchState::PLAYING;
+		eventQueue.emplace_back(
+			StateSTag::ConstructMethodMessage("GameLogic", "StartPlay",
+				[this](XMLPrinter& printer) {
+					NewElementWithText(printer, "Player", m_playerTurn);
+				}, true),
+			true);
+
+		// Play card on behalf of computer player
+		if (m_playerSeatsComputer[m_playerTurn])
+		{
+			const std::vector<QueuedEvent> events =
+				ProcessPlayCard(m_playerTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTurn], m_spadesBroken));
+			for (const QueuedEvent& ev : events)
+			{
+				if (!ev.xml.empty())
+					eventQueue.emplace_back(ev.xml, true);
+			}
+		}
+	}
+	// Bid on behalf of computer player
+	else if (m_playerSeatsComputer[m_nextBidPlayer])
+	{
+		const std::vector<QueuedEvent> events = ProcessBid(m_nextBidPlayer, m_currentTrick.GetAutoBid(m_playerCards[m_nextBidPlayer]));
+		for (const QueuedEvent& ev : events)
+		{
+			if (!ev.xml.empty())
+				eventQueue.emplace_back(ev.xml, true);
+		}
+	}
+	return eventQueue;
+}
+
+std::vector<SpadesMatch::QueuedEvent>
+SpadesMatch::ProcessPlayCard(int8_t role, Card card)
+{
+	assert(m_matchState == MatchState::PLAYING);
+
+	CardArray& cards = m_playerCards[role];
+
+	assert(!(!m_spadesBroken && m_currentTrick.IsEmpty() && GetZPACardValueSuit(card) == CardSuit::SPADES));
+	assert(m_currentTrick.FollowsSuit(card, cards));
+
+	cards.erase(std::remove(cards.begin(), cards.end(), card), cards.end());
+
+	if (!m_spadesBroken && !m_currentTrick.IsEmpty() && GetZPACardValueSuit(card) == CardSuit::SPADES)
+		m_spadesBroken = true;
+
+	m_currentTrick.Set(role, card);
+	if (++m_playerTrickTurn >= 4)
+		m_playerTrickTurn = 0;
+
+	XMLPrinter sanitizedMoveMessage;
+	sanitizedMoveMessage.OpenElement("Message");
+	sanitizedMoveMessage.OpenElement("Move");
+
+	NewElementWithText(sanitizedMoveMessage, "Role", role);
+
+	sanitizedMoveMessage.OpenElement("Card");
+	NewElementWithText(sanitizedMoveMessage, "Src", std::to_string(role) + ",");
+	NewElementWithText(sanitizedMoveMessage, "Val", card);
+	sanitizedMoveMessage.CloseElement("Card");
+
+	sanitizedMoveMessage.CloseElement("Move");
+	sanitizedMoveMessage.CloseElement("Message");
+
+	std::vector<QueuedEvent> eventQueue = {
+		sanitizedMoveMessage.print()
+	};
+	if (m_currentTrick.IsFinished())
+	{
+		m_playerTurn = m_currentTrick.GetWinner();
+		++m_playerTricksTaken[m_playerTurn];
+
+		if (cards.empty())
+		{
+			const std::array<TrickScore, 2> score =
+				CalculateTrickScore(m_playerBids, m_playerTricksTaken, m_teamBags, BID_DOUBLE_NIL, true);
+			m_teamPoints[0] += score[0].points;
+			m_teamPoints[1] += score[1].points;
+			m_teamBags[0] = score[0].bags;
+			m_teamBags[1] = score[1].bags;
+
+			if (m_teamPoints[0] >= 500 || m_teamPoints[1] <= -200 ||
+				m_teamPoints[1] >= 500 || m_teamPoints[0] <= -200)
+			{
+				m_state = STATE_GAMEOVER;
+
+				eventQueue.emplace_back(
+					StateSTag::ConstructMethodMessage("GameLogic", "StartEndOfGame", "", true),
+					true);
+				eventQueue.emplace_back(
+					StateSTag::ConstructMethodMessage("GameManagement", "ServerGameOver"),
+					true);
+			}
+			else
+			{
+				ResetHand();
+
+				eventQueue.emplace_back(
+					StateSTag::ConstructMethodMessage("GameLogic", "StartEndOfHand", "", true),
+					true);
+				eventQueue.emplace_back(
+					StateSTag::ConstructMethodMessage("GameLogic", "StartBid",
+						[this](XMLPrinter& printer) {
+							NewElementWithText(printer, "Player", m_handDealer);
+						}, true),
+					true);
+
+				// Bid on behalf of computer player
+				if (m_playerSeatsComputer[m_nextBidPlayer])
+				{
+					const std::vector<QueuedEvent> events = ProcessBid(m_nextBidPlayer, m_currentTrick.GetAutoBid(m_playerCards[m_nextBidPlayer]));
+					for (const QueuedEvent& ev : events)
+					{
+						if (!ev.xml.empty())
+							eventQueue.emplace_back(ev.xml, true);
+					}
+				}
+			}
+			return eventQueue;
+		}
+		else
+		{
+			m_playerTrickTurn = m_playerTurn;
+			m_currentTrick.Reset();
+
+			eventQueue.emplace_back(
+				StateSTag::ConstructMethodMessage("GameLogic", "StartPlay",
+					[this](XMLPrinter& printer) {
+						NewElementWithText(printer, "Player", m_playerTurn);
+					}, true),
+				true);
+		}
+	}
+
+	// Play card on behalf of computer player
+	if (m_playerSeatsComputer[m_playerTrickTurn])
+	{
+		const std::vector<QueuedEvent> events =
+			ProcessPlayCard(m_playerTrickTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTrickTurn], m_spadesBroken));
+		for (const QueuedEvent& ev : events)
+		{
+			if (!ev.xml.empty())
+				eventQueue.emplace_back(ev.xml, true);
+		}
+	}
+	return eventQueue;
 }
 
 
@@ -97,87 +320,18 @@ SpadesMatch::ProcessEvent(const tinyxml2::XMLElement& elEvent, const PlayerSocke
 				{
 					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Couldn't parse bid value as integer: " + std::string(err.what()));
 				}
-				if (bid == BID_SHOWN_CARDS)
-				{
-					if (m_playerBids[caller.m_role] == BID_HAND_START)
-						m_playerBids[caller.m_role] = BID_SHOWN_CARDS;
 
-					const CardArray& cards = m_playerCards.at(caller.m_role);
-					return {
-						QueuedEvent(
-							{},
-							StateSTag::ConstructMethodMessage("GameLogic", "DealCards",
-								[&cards](XMLPrinter& printer)
-								{
-									printer.OpenElement("Cards");
-									for (Card card : cards)
-										NewElementWithText(printer, "C", card);
-									printer.CloseElement("Cards");
-								}, true))
-					};
-				}
 				if (bid == BID_DOUBLE_NIL || bid >= 0)
 				{
-					const bool bidDoubleNil = bid == BID_DOUBLE_NIL;
-					if (m_playerBids[caller.m_role] != (bidDoubleNil ? BID_HAND_START : BID_SHOWN_CARDS))
+					if (m_playerBids[caller.m_role] != (bid == BID_DOUBLE_NIL ? BID_HAND_START : BID_SHOWN_CARDS))
 						throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Player is not in a proper start bid state!");
-
-					bool moreBidsToSend = m_nextBidPlayer != m_handDealer ||
-						std::all_of(m_playerBids.begin(), m_playerBids.end(), [](int bid) { return bid <= BID_SHOWN_CARDS; });
-
-					m_playerBids[caller.m_role] = bid;
-
-					while (moreBidsToSend && m_playerBids[m_nextBidPlayer] > BID_SHOWN_CARDS)
-					{
-						XMLPrinter sanitizedBidMessage;
-						sanitizedBidMessage.OpenElement("Message");
-						sanitizedBidMessage.OpenElement("Move");
-
-						NewElementWithText(sanitizedBidMessage, "Role", m_nextBidPlayer);
-						NewElementWithText(sanitizedBidMessage, "Bid", m_playerBids[m_nextBidPlayer]);
-
-						sanitizedBidMessage.CloseElement("Move");
-						sanitizedBidMessage.CloseElement("Message");
-
-						for (const PlayerSocket* player : m_players)
-						{
-							if (player->m_role != m_nextBidPlayer)
-								player->OnEventReceive(sanitizedBidMessage);
-						}
-
-						if (++m_nextBidPlayer >= 4)
-							m_nextBidPlayer = 0;
-						moreBidsToSend = m_nextBidPlayer != m_handDealer;
-					}
-
-					std::vector<QueuedEvent> eventQueue;
-					if (bidDoubleNil)
-					{
-						const CardArray& cards = m_playerCards.at(caller.m_role);
-						eventQueue.emplace_back(
-							"",
-							StateSTag::ConstructMethodMessage("GameLogic", "DealCards",
-								[&cards](XMLPrinter& printer)
-								{
-									printer.OpenElement("Cards");
-									for (Card card : cards)
-										NewElementWithText(printer, "C", card);
-									printer.CloseElement("Cards");
-								}, true));
-					}
-					if (!moreBidsToSend)
-					{
-						m_matchState = MatchState::PLAYING;
-						eventQueue.emplace_back(
-							StateSTag::ConstructMethodMessage("GameLogic", "StartPlay",
-								[this](XMLPrinter& printer) {
-									NewElementWithText(printer, "Player", m_playerTurn);
-								}, true),
-							true);
-					}
-					return eventQueue;
 				}
-				throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Invalid bid value!");
+				else if (bid != BID_SHOWN_CARDS)
+				{
+					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Invalid bid value!");
+				}
+
+				return ProcessBid(caller.m_role, bid);
 			}
 			case MatchState::PLAYING:
 			{
@@ -222,102 +376,27 @@ SpadesMatch::ProcessEvent(const tinyxml2::XMLElement& elEvent, const PlayerSocke
 				if (dest - src != 4)
 					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Invalid source/target value(s)!");
 
-				uint16_t cardValue;
+				uint16_t card;
 				try
 				{
-					cardValue = static_cast<uint16_t>(std::stoi(elVal->GetText()));
+					card = static_cast<uint16_t>(std::stoi(elVal->GetText()));
 				}
 				catch (const std::exception& err)
 				{
 					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Couldn't parse card value as integer: " + std::string(err.what()));
 				}
-				if (!IsValidZPACardValue(cardValue))
+				if (!IsValidZPACardValue(card))
 					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Invalid card value!");
+				if (!m_spadesBroken && m_currentTrick.IsEmpty() && GetZPACardValueSuit(card) == CardSuit::SPADES)
+					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Cannot lead a Spade before Spades are broken!");
 
-				CardArray& cards = m_playerCards[caller.m_role];
-				if (std::find(cards.begin(), cards.end(), cardValue) == cards.end())
+				const CardArray& cards = m_playerCards[caller.m_role];
+				if (std::find(cards.begin(), cards.end(), card) == cards.end())
 					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Player does not possess provided card!");
-				if (!m_currentTrick.FollowsSuit(cardValue, cards))
+				if (!m_currentTrick.FollowsSuit(card, cards))
 					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Card does not follow suit!");
 
-				cards.erase(std::remove(cards.begin(), cards.end(), cardValue), cards.end());
-
-				m_currentTrick.Set(caller.m_role, cardValue);
-				if (++m_playerTrickTurn >= 4)
-					m_playerTrickTurn = 0;
-
-				XMLPrinter sanitizedMoveMessage;
-				sanitizedMoveMessage.OpenElement("Message");
-				sanitizedMoveMessage.OpenElement("Move");
-
-				NewElementWithText(sanitizedMoveMessage, "Role", caller.m_role);
-
-				sanitizedMoveMessage.OpenElement("Card");
-				NewElementWithText(sanitizedMoveMessage, "Src", std::to_string(src) + ",");
-				NewElementWithText(sanitizedMoveMessage, "Val", cardValue);
-				sanitizedMoveMessage.CloseElement("Card");
-
-				sanitizedMoveMessage.CloseElement("Move");
-				sanitizedMoveMessage.CloseElement("Message");
-
-				std::vector<QueuedEvent> eventQueue = {
-					sanitizedMoveMessage.print()
-				};
-				if (m_currentTrick.IsFinished())
-				{
-					m_playerTurn = m_currentTrick.GetWinner();
-					++m_playerTricksTaken[m_playerTurn];
-
-					if (cards.empty())
-					{
-						const std::array<TrickScore, 2> score =
-							CalculateTrickScore(m_playerBids, m_playerTricksTaken, m_teamBags, BID_DOUBLE_NIL, true);
-						m_teamPoints[0] += score[0].points;
-						m_teamPoints[1] += score[1].points;
-						m_teamBags[0] = score[0].bags;
-						m_teamBags[1] = score[1].bags;
-
-						if (m_teamPoints[0] >= 500 || m_teamPoints[1] <= -200 ||
-							m_teamPoints[1] >= 500 || m_teamPoints[0] <= -200)
-						{
-							m_state = STATE_GAMEOVER;
-
-							eventQueue.emplace_back(
-								StateSTag::ConstructMethodMessage("GameLogic", "StartEndOfGame", "", true),
-								true);
-							eventQueue.emplace_back(
-								StateSTag::ConstructMethodMessage("GameManagement", "ServerGameOver"),
-								true);
-						}
-						else
-						{
-							ResetHand();
-
-							eventQueue.emplace_back(
-								StateSTag::ConstructMethodMessage("GameLogic", "StartEndOfHand", "", true),
-								true);
-							eventQueue.emplace_back(
-								StateSTag::ConstructMethodMessage("GameLogic", "StartBid",
-									[this](XMLPrinter& printer) {
-										NewElementWithText(printer, "Player", m_handDealer);
-									}, true),
-								true);
-						}
-					}
-					else
-					{
-						m_playerTrickTurn = m_playerTurn;
-						m_currentTrick.Reset();
-
-						eventQueue.emplace_back(
-							StateSTag::ConstructMethodMessage("GameLogic", "StartPlay",
-								[this](XMLPrinter& printer) {
-									NewElementWithText(printer, "Player", m_playerTurn);
-								}, true),
-							true);
-					}
-				}
-				return eventQueue;
+				return ProcessPlayCard(caller.m_role, card);
 			}
 		}
 		throw std::runtime_error("SpadesMatch::ProcessEvent(): Invalid message for match state " + std::to_string(static_cast<int>(m_matchState)) + " received!");
@@ -329,19 +408,56 @@ SpadesMatch::ProcessEvent(const tinyxml2::XMLElement& elEvent, const PlayerSocke
 void
 SpadesMatch::OnReplacePlayer(const PlayerSocket& player)
 {
-	// TODO
+	// If needed, interact with the match on behalf of the new computer player
+	std::vector<QueuedEvent> events;
+	switch (m_matchState)
+	{
+		case MatchState::BIDDING:
+		{
+			if (m_nextBidPlayer == player.m_role)
+				events = ProcessBid(player.m_role, m_currentTrick.GetAutoBid(m_playerCards[player.m_role]));
+			break;
+		}
+		case MatchState::PLAYING:
+		{
+			if (m_playerTrickTurn == player.m_role)
+				events = ProcessPlayCard(player.m_role, m_currentTrick.GetAutoCard(m_playerCards[player.m_role], m_spadesBroken));
+			break;
+		}
+	}
+	for (const QueuedEvent& ev : events)
+	{
+		if (!ev.xml.empty())
+		{
+			for (const PlayerSocket* p : m_players)
+				p->OnEventReceive(ev.xml);
+		}
+	}
 }
 
 
 std::vector<std::string>
-SpadesMatch::ConstructGameStartMessagesXML(const PlayerSocket& caller) const
+SpadesMatch::ConstructGameStartMessagesXML(const PlayerSocket& caller)
 {
-	return {
+	std::vector<std::string> messages = {
 		StateSTag::ConstructMethodMessage("GameLogic", "StartBid",
 			[this](XMLPrinter& printer) {
 				NewElementWithText(printer, "Player", m_handDealer);
 			}, true)
 	};
+
+	// Bid on behalf of computer player
+	if (m_playerSeatsComputer[m_nextBidPlayer])
+	{
+		const std::vector<QueuedEvent> events = ProcessBid(m_nextBidPlayer, m_currentTrick.GetAutoBid(m_playerCards[m_nextBidPlayer]));
+		for (const QueuedEvent& ev : events)
+		{
+			if (!ev.xml.empty())
+				messages.push_back(ev.xml);
+		}
+	}
+
+	return messages;
 }
 
 

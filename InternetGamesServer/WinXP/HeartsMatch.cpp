@@ -32,6 +32,13 @@ static bool IsValidXPCardValue(Card value)
 
 namespace WinXP {
 
+static std::array<Card, HeartsNumCardsInPass> HeartsGetAutoPass(const std::vector<Card>& hand)
+{
+	// TODO!
+	return { hand[0], hand[1], hand[2] };
+}
+
+
 HeartsMatch::CardTrick::CardTrick() :
 	m_leadCard(),
 	m_playerCards()
@@ -128,6 +135,46 @@ HeartsMatch::CardTrick::GetPoints() const
 	return points;
 }
 
+Card
+HeartsMatch::CardTrick::GetAutoCard(const std::vector<Card>& hand, bool pointsBroken) const
+{
+	// TODO! This is temporary/unfinished
+	for (Card card : hand)
+	{
+		if (!FollowsSuit(card, hand))
+			continue;
+
+		if (m_leadCard == HeartsUnsetCard) // Playing lead card?
+		{
+			if (hand.size() >= HeartsNumCardsInHand) // First trick?
+			{
+				if (card != HeartsCard2C)
+					continue;
+			}
+			else if (!pointsBroken && GetXPCardValueSuit(card) == CardSuit::HEARTS)
+			{
+				if (std::any_of(hand.begin(), hand.end(), [](Card c) { return GetXPCardValueSuit(c) != CardSuit::HEARTS; }))
+					continue;
+			}
+		}
+		else if (hand.size() >= HeartsNumCardsInHand) // Not playing lead card. First trick?
+		{
+			if (card == HeartsCardQS)
+			{
+				continue;
+			}
+			else if (GetXPCardValueSuit(card) == CardSuit::HEARTS)
+			{
+				if (std::any_of(hand.begin(), hand.end(), [](Card c) { return GetXPCardValueSuit(c) != CardSuit::HEARTS; }))
+					continue;
+			}
+		}
+
+		return card;
+	}
+	return 0;
+}
+
 
 HeartsMatch::HeartsMatch(unsigned int index, PlayerSocket& player) :
 	Match(index, player),
@@ -177,6 +224,7 @@ HeartsMatch::ResetHand()
 			allCards.begin() + (i + 1) * HeartsNumCardsInHand);
 }
 
+
 void
 HeartsMatch::RegisterCheckIn(int16 seat)
 {
@@ -186,6 +234,7 @@ HeartsMatch::RegisterCheckIn(int16 seat)
 	if (ARRAY_EACH_TRUE(m_playersCheckedIn))
 	{
 		m_playersCheckedIn = {};
+		m_state = STATE_PLAYING;
 		m_matchState = MatchState::PASSING;
 
 		MsgStartGame msgStartGame;
@@ -214,6 +263,210 @@ HeartsMatch::RegisterCheckIn(int16 seat)
 			player->OnMatchGameMessage<MessageStartHand>(msgStartHand);
 		}
 	}
+}
+
+void
+HeartsMatch::ProcessPass(int16 seat, std::array<Card, HeartsNumCardsInPass> passCards)
+{
+	using namespace Hearts;
+
+	assert(m_matchState == MatchState::PASSING);
+
+	const int16 passReceiver = (seat + m_passDirection) % HeartsNumPlayers;
+	CardArray& cards = m_playerCards[seat];
+	for (int8_t i = 0; i < HeartsNumCardsInPass; ++i)
+	{
+		const char card = passCards[i];
+		if (!IsValidXPCardValue(card))
+			throw std::runtime_error("Hearts::MsgPass: Invalid card!");
+		if (std::find(cards.begin(), cards.begin() + min(cards.size(), HeartsNumCardsInHand), card) == cards.end())
+			throw std::runtime_error("Hearts::MessagePass: Player does not possess provided card!");
+
+		cards.erase(std::remove(cards.begin(), cards.end(), card), cards.end());
+		m_playerCards[passReceiver].push_back(card);
+	}
+
+	MsgPass msgPass;
+	msgPass.seat = seat;
+	std::copy(passCards.begin(), passCards.end(), std::begin(msgPass.cards));
+	BroadcastGameMessage<MessagePass>(msgPass);
+
+	m_playersPassedCards[seat] = true;
+	if (ARRAY_EACH_TRUE(m_playersPassedCards))
+	{
+		m_playerTurn = -1;
+		for (int16 seat = 0; seat < HeartsNumPlayers; ++seat)
+		{
+			const CardArray& playerCards = m_playerCards[seat];
+			if (std::find(playerCards.begin(), playerCards.end(), HeartsCard2C) != playerCards.end())
+			{
+				m_playerTurn = seat;
+				break;
+			}
+		}
+		if (m_playerTurn < 0)
+			throw std::runtime_error("Hearts::MessagePass: Could not find player with card 2C!");
+
+		MsgStartPlay msgStartPlay;
+		msgStartPlay.seat = m_playerTurn;
+		BroadcastGameMessage<MessageStartPlay>(msgStartPlay);
+
+		m_matchState = MatchState::PLAYING;
+
+		// Play card on behalf of computer player
+		if (m_playerSeatsComputer[m_playerTurn])
+			ProcessPlayCard(m_playerTurn, HeartsCard2C);
+	}
+	// Pass cards on behalf of computer players
+	else if (m_players.size() < HeartsNumPlayers)
+	{
+		for (int16 otherSeat = 0; otherSeat < HeartsNumPlayers; ++otherSeat)
+		{
+			if (m_playerSeatsComputer[otherSeat] && !m_playersPassedCards[otherSeat])
+			{
+				ProcessPass(otherSeat, HeartsGetAutoPass(m_playerCards[otherSeat]));
+				break; // Recursion has taken care of any others
+			}
+		}
+	}
+}
+
+void
+HeartsMatch::ProcessPlayCard(int16 seat, Card card)
+{
+	using namespace Hearts;
+
+	assert(m_matchState == MatchState::PLAYING);
+
+	CardArray& cards = m_playerCards[seat];
+
+	assert(!(!m_pointsBroken && m_currentTrick.IsEmpty() && GetXPCardValueSuit(card) == CardSuit::HEARTS));
+	assert(m_currentTrick.FollowsSuit(card, cards));
+
+	cards.erase(std::remove(cards.begin(), cards.end(), card), cards.end());
+
+	if (!m_pointsBroken && (card == HeartsCardQS || GetXPCardValueSuit(card) == CardSuit::HEARTS))
+		m_pointsBroken = true;
+
+	m_currentTrick.Set(seat, card);
+	if (++m_playerTurn >= 4)
+		m_playerTurn = 0;
+
+	MsgPlay msgPlay;
+	msgPlay.seat = seat;
+	msgPlay.card = card;
+	BroadcastGameMessage<MessagePlay>(msgPlay);
+
+	if (m_currentTrick.IsFinished())
+	{
+		m_playerTurn = m_currentTrick.GetWinner();
+		m_playerHandPoints[m_playerTurn] += m_currentTrick.GetPoints();
+
+		if (cards.empty())
+		{
+			// "Shooting the Moon" strategy: If a player has collected all points from a hand,
+			// all other players will get them instead. Said player will be left with 0.
+			for (int16 otherSeat = 0; otherSeat < HeartsNumPlayers; ++otherSeat)
+			{
+				if (m_playerHandPoints[otherSeat] > 0)
+				{
+					if (m_playerHandPoints[otherSeat] >= HeartsNumPointsInHand)
+					{
+						m_playerHandPoints.fill(HeartsNumPointsInHand);
+						m_playerHandPoints[otherSeat] = 0;
+					}
+					break;
+				}
+			}
+
+			for (int16 otherSeat = 0; otherSeat < HeartsNumPlayers; ++otherSeat)
+				m_playerTotalPoints[otherSeat] += m_playerHandPoints[otherSeat];
+
+			MsgEndHand msgEndHand;
+			std::copy(m_playerHandPoints.begin(), m_playerHandPoints.end(), std::begin(msgEndHand.points));
+			BroadcastGameMessage<MessageEndHand>(msgEndHand);
+
+			ResetHand();
+
+			if (std::any_of(m_playerTotalPoints.begin(), m_playerTotalPoints.end(),
+				[](int16 p) { return p >= HeartsNumPointsInGame; }))
+			{
+				MsgEndGame msgEndGame;
+				BroadcastGameMessage<MessageEndGame>(msgEndGame);
+
+				m_matchState = MatchState::ENDED;
+				m_state = STATE_GAMEOVER;
+
+				// Request new game on behalf of computer players
+				if (m_players.size() < HeartsNumPlayers)
+				{
+					MsgNewGameVote msgNewGameVote;
+					for (int16 seat = 0; seat < HeartsNumPlayers; ++seat)
+					{
+						if (m_playerSeatsComputer[seat])
+						{
+							msgNewGameVote.seat = seat;
+							BroadcastGameMessage<MessageNewGameVote>(msgNewGameVote);
+
+							m_playersCheckedIn[seat] = true;
+						}
+					}
+				}
+			}
+			else
+			{
+				MsgStartHand msgStartHand;
+				msgStartHand.passDirection = m_passDirection;
+				for (PlayerSocket* player : m_players)
+				{
+					const std::vector<Card>& cards = m_playerCards.at(player->m_seat);
+					for (BYTE y = 0; y < HeartsNumCardsInHand; ++y)
+						msgStartHand.hand[y] = cards[y];
+
+					player->OnMatchGameMessage<MessageStartHand>(msgStartHand);
+				}
+
+				if (m_passDirection == MsgStartHand::PASS_NONE)
+				{
+					m_playerTurn = -1;
+					for (int16 seat = 0; seat < HeartsNumPlayers; ++seat)
+					{
+						const CardArray& playerCards = m_playerCards[seat];
+						if (std::find(playerCards.begin(), playerCards.end(), HeartsCard2C) != playerCards.end())
+						{
+							m_playerTurn = seat;
+							break;
+						}
+					}
+					if (m_playerTurn < 0)
+						throw std::runtime_error("Hearts::MessagePass: Could not find player with card 2C!");
+
+					MsgStartPlay msgStartPlay;
+					msgStartPlay.seat = m_playerTurn;
+					BroadcastGameMessage<MessageStartPlay>(msgStartPlay);
+
+					m_matchState = MatchState::PLAYING;
+
+					// Play card on behalf of computer player
+					if (m_playerSeatsComputer[m_playerTurn])
+						ProcessPlayCard(m_playerTurn, HeartsCard2C);
+				}
+				else
+				{
+					m_matchState = MatchState::PASSING;
+				}
+			}
+			return;
+		}
+		else
+		{
+			m_currentTrick.Reset();
+		}
+	}
+
+	// Play card on behalf of computer player
+	if (m_playerSeatsComputer[m_playerTurn])
+		ProcessPlayCard(m_playerTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTurn], m_pointsBroken));
 }
 
 
@@ -246,48 +499,16 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		{
 			if (type == MessagePass)
 			{
-				MsgPass msgPass = player.OnMatchAwaitGameMessage<MsgPass, MessagePass>();
+				const MsgPass msgPass = player.OnMatchAwaitGameMessage<MsgPass, MessagePass>();
 				if (msgPass.seat != player.m_seat)
 					throw std::runtime_error("Hearts::MsgPass: Incorrect player seat!");
 
-				const int16 passReceiver = (player.m_seat + m_passDirection) % HeartsNumPlayers;
-				CardArray& cards = m_playerCards[player.m_seat];
-				for (int8_t i = 0; i < HeartsNumCardsInPass; ++i)
-				{
-					const char card = msgPass.cards[i];
-					if (!IsValidXPCardValue(card))
-						throw std::runtime_error("Hearts::MsgPass: Invalid card!");
-					if (std::find(cards.begin(), cards.end(), card) == cards.end())
-						throw std::runtime_error("Hearts::MessagePass: Player does not possess provided card!");
+				if (m_playersPassedCards[player.m_seat])
+					throw std::runtime_error("Hearts::MessagePass: Player has already passed cards!");
 
-					cards.erase(std::remove(cards.begin(), cards.end(), card), cards.end());
-					m_playerCards[passReceiver].push_back(card);
-				}
-
-				BroadcastGameMessage<MessagePass>(msgPass);
-
-				m_playersPassedCards[player.m_seat] = true;
-				if (ARRAY_EACH_TRUE(m_playersPassedCards))
-				{
-					m_playerTurn = -1;
-					for (int16 seat = 0; seat < HeartsNumPlayers; ++seat)
-					{
-						const CardArray& playerCards = m_playerCards[seat];
-						if (std::find(playerCards.begin(), playerCards.end(), HeartsCard2C) != playerCards.end())
-						{
-							m_playerTurn = seat;
-							break;
-						}
-					}
-					if (m_playerTurn < 0)
-						throw std::runtime_error("Hearts::MessagePass: Could not find player with card 2C!");
-
-					MsgStartPlay msgStartPlay;
-					msgStartPlay.seat = m_playerTurn;
-					BroadcastGameMessage<MessageStartPlay>(msgStartPlay);
-
-					m_matchState = MatchState::PLAYING;
-				}
+				std::array<Card, HeartsNumCardsInPass> passCards;
+				std::copy(std::begin(msgPass.cards), std::end(msgPass.cards), passCards.begin());
+				ProcessPass(player.m_seat, std::move(passCards));
 				return;
 			}
 			break;
@@ -296,7 +517,7 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		{
 			if (type == MessagePlay)
 			{
-				MsgPlay msgPlay = player.OnMatchAwaitGameMessage<MsgPlay, MessagePlay>();
+				const MsgPlay msgPlay = player.OnMatchAwaitGameMessage<MsgPlay, MessagePlay>();
 				if (msgPlay.seat != player.m_seat)
 					throw std::runtime_error("Hearts::MsgPlay: Incorrect player seat!");
 				if (!IsValidXPCardValue(msgPlay.card))
@@ -305,7 +526,7 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 				if (msgPlay.seat != m_playerTurn)
 					throw std::runtime_error("Hearts::MessagePlay: Not this player's turn!");
 
-				CardArray& cards = m_playerCards[player.m_seat];
+				const CardArray& cards = m_playerCards[player.m_seat];
 				if (std::find(cards.begin(), cards.end(), msgPlay.card) == cards.end())
 					throw std::runtime_error("Hearts::MessagePlay: Player does not possess provided card!");
 				if (!m_currentTrick.FollowsSuit(msgPlay.card, cards))
@@ -337,118 +558,7 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 					}
 				}
 
-				cards.erase(std::remove(cards.begin(), cards.end(), msgPlay.card), cards.end());
-
-				if (!m_pointsBroken && (msgPlay.card == HeartsCardQS || GetXPCardValueSuit(msgPlay.card) == CardSuit::HEARTS))
-					m_pointsBroken = true;
-
-				m_currentTrick.Set(player.m_seat, msgPlay.card);
-				if (++m_playerTurn >= 4)
-					m_playerTurn = 0;
-
-				BroadcastGameMessage<MessagePlay>(msgPlay);
-
-				if (m_currentTrick.IsFinished())
-				{
-					m_playerTurn = m_currentTrick.GetWinner();
-					m_playerHandPoints[m_playerTurn] += m_currentTrick.GetPoints();
-
-					if (cards.empty())
-					{
-						// "Shooting the Moon" strategy: If a player has collected all points from a hand,
-						// all other players will get them instead. Said player will be left with 0.
-						for (int16 seat = 0; seat < HeartsNumPlayers; ++seat)
-						{
-							if (m_playerHandPoints[seat] > 0)
-							{
-								if (m_playerHandPoints[seat] >= HeartsNumPointsInHand)
-								{
-									m_playerHandPoints.fill(HeartsNumPointsInHand);
-									m_playerHandPoints[seat] = 0;
-								}
-								break;
-							}
-						}
-
-						for (int16 seat = 0; seat < HeartsNumPlayers; ++seat)
-							m_playerTotalPoints[seat] += m_playerHandPoints[seat];
-
-						MsgEndHand msgEndHand;
-						std::memcpy(msgEndHand.points, m_playerHandPoints.data(), sizeof(msgEndHand.points));
-						BroadcastGameMessage<MessageEndHand>(msgEndHand);
-
-						ResetHand();
-
-						if (std::any_of(m_playerTotalPoints.begin(), m_playerTotalPoints.end(),
-								[](int16 p) { return p >= HeartsNumPointsInGame; }))
-						{
-							MsgEndGame msgEndGame;
-							BroadcastGameMessage<MessageEndGame>(msgEndGame);
-
-							m_matchState = MatchState::ENDED;
-							m_state = STATE_GAMEOVER;
-
-							// Request new game on behalf of computer players
-							if (m_players.size() < HeartsNumPlayers)
-							{
-								MsgNewGameVote msgNewGameVote;
-								for (int16 seat = 0; seat < HeartsNumPlayers; ++seat)
-								{
-									if (m_playerSeatsComputer[seat])
-									{
-										msgNewGameVote.seat = seat;
-										BroadcastGameMessage<MessageNewGameVote>(msgNewGameVote);
-
-										m_playersCheckedIn[seat] = true;
-									}
-								}
-							}
-						}
-						else
-						{
-							MsgStartHand msgStartHand;
-							msgStartHand.passDirection = m_passDirection;
-							for (PlayerSocket* player : m_players)
-							{
-								const std::vector<Card>& cards = m_playerCards.at(player->m_seat);
-								for (BYTE y = 0; y < HeartsNumCardsInHand; ++y)
-									msgStartHand.hand[y] = cards[y];
-
-								player->OnMatchGameMessage<MessageStartHand>(msgStartHand);
-							}
-
-							if (m_passDirection == MsgStartHand::PASS_NONE)
-							{
-								m_playerTurn = -1;
-								for (int16 seat = 0; seat < HeartsNumPlayers; ++seat)
-								{
-									const CardArray& playerCards = m_playerCards[seat];
-									if (std::find(playerCards.begin(), playerCards.end(), HeartsCard2C) != playerCards.end())
-									{
-										m_playerTurn = seat;
-										break;
-									}
-								}
-								if (m_playerTurn < 0)
-									throw std::runtime_error("Hearts::MessagePass: Could not find player with card 2C!");
-
-								MsgStartPlay msgStartPlay;
-								msgStartPlay.seat = m_playerTurn;
-								BroadcastGameMessage<MessageStartPlay>(msgStartPlay);
-
-								m_matchState = MatchState::PLAYING;
-							}
-							else
-							{
-								m_matchState = MatchState::PASSING;
-							}
-						}
-					}
-					else
-					{
-						m_currentTrick.Reset();
-					}
-				}
+				ProcessPlayCard(player.m_seat, msgPlay.card);
 				return;
 			}
 			break;
@@ -535,11 +645,24 @@ HeartsMatch::OnReplacePlayer(const PlayerSocket& player, uint32 userIDNew)
 	msgReplacePlayer.seat = player.m_seat;
 	BroadcastGameMessage<MessageReplacePlayer>(msgReplacePlayer);
 
+	// If needed, interact with the match on behalf of the new computer player
 	switch (m_matchState)
 	{
 		case MatchState::INITIALIZING:
 		{
 			RegisterCheckIn(player.m_seat);
+			break;
+		}
+		case MatchState::PASSING:
+		{
+			if (!m_playersPassedCards[player.m_seat])
+				ProcessPass(player.m_seat, HeartsGetAutoPass(m_playerCards[player.m_seat]));
+			break;
+		}
+		case MatchState::PLAYING:
+		{
+			if (m_playerTurn == player.m_seat)
+				ProcessPlayCard(player.m_seat, m_currentTrick.GetAutoCard(m_playerCards[player.m_seat], m_pointsBroken));
 			break;
 		}
 		case MatchState::ENDED:

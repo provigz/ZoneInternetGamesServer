@@ -25,14 +25,16 @@ protected:
 	void OnReplacePlayer(const PlayerSocket& player, uint32 userIDNew) override;
 
 private:
+	typedef int8_t Card;
+	typedef std::vector<Card> CardArray;
+
+private:
 	void Reset();
 	void ResetHand();
 
 	void RegisterCheckIn(int16 seat);
-
-private:
-	typedef int8_t Card;
-	typedef std::vector<Card> CardArray;
+	void ProcessBid(int16 seat, int8_t bid);
+	void ProcessPlayCard(int16 seat, Card card);
 
 private:
 	enum class MatchState
@@ -59,6 +61,7 @@ private:
 	};
 	std::array<int8_t, 4> m_playerBids;
 
+	bool m_spadesBroken;
 	int16 m_playerTurn;
 	int16 m_playerTrickTurn;
 	std::array<int16, 4> m_playerTricksTaken;

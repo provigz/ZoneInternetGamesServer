@@ -8,6 +8,7 @@
 namespace WinXP {
 
 #define HeartsNumPlayers 4
+#define HeartsNumCardsInPass 3
 
 class HeartsMatch final : public Match
 {
@@ -26,14 +27,16 @@ protected:
 	void OnReplacePlayer(const PlayerSocket& player, uint32 userIDNew) override;
 
 private:
+	typedef int8_t Card;
+	typedef std::vector<Card> CardArray;
+
+private:
 	void Reset();
 	void ResetHand();
 
 	void RegisterCheckIn(int16 seat);
-
-private:
-	typedef int8_t Card;
-	typedef std::vector<Card> CardArray;
+	void ProcessPass(int16 seat, std::array<Card, HeartsNumCardsInPass> passCards);
+	void ProcessPlayCard(int16 seat, Card card);
 
 	class CardTrick final
 	{
@@ -50,6 +53,8 @@ private:
 		bool IsFinished() const;
 		int16 GetWinner() const;
 		int16 GetPoints() const;
+
+		Card GetAutoCard(const std::vector<Card>& hand, bool pointsBroken) const;
 
 	private:
 		Card m_leadCard;

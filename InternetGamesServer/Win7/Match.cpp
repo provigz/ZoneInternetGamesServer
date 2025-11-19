@@ -179,6 +179,8 @@ Match::DisconnectedPlayer(PlayerSocket& player)
 			for (PlayerSocket* p : m_players)
 				p->OnEventReceive(replaceWithAIXML);
 
+			OnReplacePlayer(player);
+
 			m_playerSeatsComputer[player.m_role] = true;
 		}
 #if not MATCH_NO_DISCONNECT_ON_PLAYER_LEAVE
@@ -414,7 +416,7 @@ Match::ConstructGameInitXML(PlayerSocket* caller) const
 }
 
 std::vector<std::string>
-Match::ConstructGameStartMessagesXML(const PlayerSocket&) const
+Match::ConstructGameStartMessagesXML(const PlayerSocket&)
 {
 	return {};
 }

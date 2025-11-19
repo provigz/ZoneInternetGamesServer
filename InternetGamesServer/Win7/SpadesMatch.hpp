@@ -19,7 +19,7 @@ public:
 	int8_t GetRequiredPlayerCount() const override { return 4; }
 	bool SupportsComputerPlayers() const override { return true; }
 
-	std::vector<std::string> ConstructGameStartMessagesXML(const PlayerSocket& caller) const override;
+	std::vector<std::string> ConstructGameStartMessagesXML(const PlayerSocket& caller) override;
 
 protected:
 	std::pair<uint8_t, uint8_t> GetCustomChatMessagesRange() const override { return { 50, 54 }; }
@@ -28,9 +28,6 @@ protected:
 	std::vector<QueuedEvent> ProcessEvent(const tinyxml2::XMLElement& elEvent, const PlayerSocket& caller) override;
 
 	void OnReplacePlayer(const PlayerSocket& player) override;
-
-private:
-	void ResetHand();
 
 private:
 	enum BidValues
@@ -43,6 +40,12 @@ private:
 private:
 	typedef uint16_t Card;
 	typedef std::vector<Card> CardArray;
+
+private:
+	void ResetHand();
+
+	std::vector<QueuedEvent> ProcessBid(int8_t role, int8_t bid);
+	std::vector<QueuedEvent> ProcessPlayCard(int8_t role, Card card);
 
 private:
 	enum class MatchState
@@ -59,6 +62,7 @@ private:
 	int8_t m_nextBidPlayer;
 	std::array<int8_t, 4> m_playerBids;
 	std::array<CardArray, 4> m_playerCards;
+	bool m_spadesBroken;
 	int8_t m_playerTurn;
 	int8_t m_playerTrickTurn;
 	std::array<int16_t, 4> m_playerTricksTaken;

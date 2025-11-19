@@ -33,6 +33,7 @@ SpadesMatch::SpadesMatch(unsigned int index, PlayerSocket& player) :
 	m_handDealer(),
 	m_nextBidPlayer(),
 	m_playerBids(),
+	m_spadesBroken(),
 	m_playerTurn(),
 	m_playerTrickTurn(),
 	m_playerTricksTaken(),
@@ -61,6 +62,7 @@ SpadesMatch::ResetHand()
 		m_handDealer = 0;
 	m_nextBidPlayer = m_handDealer;
 
+	m_spadesBroken = false;
 	m_playerBids = { BID_HAND_START, BID_HAND_START, BID_HAND_START, BID_HAND_START };
 	if ((m_playerTurn = m_handDealer + 1) >= 4)
 		m_playerTurn = 0;
@@ -79,10 +81,14 @@ SpadesMatch::ResetHand()
 			allCards.begin() + (i + 1) * SpadesNumCardsInHand);
 }
 
+
 void
 SpadesMatch::RegisterCheckIn(int16 seat)
 {
 	using namespace Spades;
+
+	assert(m_matchState == MatchState::INITIALIZING ||
+		m_matchState == MatchState::ENDED);
 
 	m_playersCheckedIn[seat] = true;
 	if (ARRAY_EACH_TRUE(m_playersCheckedIn))
@@ -117,7 +123,199 @@ SpadesMatch::RegisterCheckIn(int16 seat)
 
 			player->OnMatchGameMessage<MessageStartBid>(msgStartBid);
 		}
+
+		// Bid on behalf of computer player
+		if (m_playerSeatsComputer[m_handDealer])
+			ProcessBid(m_handDealer, m_currentTrick.GetAutoBid(m_playerCards[m_handDealer]));
 	}
+}
+
+void
+SpadesMatch::ProcessBid(int16 seat, int8_t bid)
+{
+	using namespace Spades;
+
+	assert(m_matchState == MatchState::BIDDING);
+
+	bool moreBidsToSend = m_nextBidPlayer != m_handDealer ||
+		std::all_of(m_playerBids.begin(), m_playerBids.end(),
+			[](char bid)
+			{
+				return bid == BID_SHOWN_CARDS || bid == BID_HAND_START;
+			});
+	if (!moreBidsToSend)
+	{
+		MsgStartPlay msgStartPlay;
+		msgStartPlay.leader = m_playerTurn;
+		BroadcastGameMessage<MessageStartPlay>(msgStartPlay);
+
+		m_matchState = MatchState::PLAYING;
+
+		// Play card on behalf of computer player
+		if (m_playerSeatsComputer[m_playerTurn])
+			ProcessPlayCard(m_playerTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTurn], m_spadesBroken));
+		return;
+	}
+
+	m_playerBids[seat] = bid;
+
+	MsgBid msgBid;
+	while (moreBidsToSend &&
+		m_playerBids[m_nextBidPlayer] != BID_SHOWN_CARDS &&
+		m_playerBids[m_nextBidPlayer] != BID_HAND_START)
+	{
+		msgBid.seat = m_nextBidPlayer;
+		msgBid.bid = m_playerBids[m_nextBidPlayer];
+
+		if (++m_nextBidPlayer >= 4)
+			m_nextBidPlayer = 0;
+
+		msgBid.nextBidder = m_nextBidPlayer;
+		BroadcastGameMessage<MessageBid>(msgBid);
+
+		moreBidsToSend = m_nextBidPlayer != m_handDealer;
+	}
+
+	// Bid on behalf of computer player
+	if (moreBidsToSend && m_playerSeatsComputer[m_nextBidPlayer])
+	{
+		ProcessBid(m_nextBidPlayer, m_currentTrick.GetAutoBid(m_playerCards[m_nextBidPlayer]));
+		return;
+	}
+	if (!moreBidsToSend && m_playerSeatsComputer[m_handDealer])
+	{
+		MsgStartPlay msgStartPlay;
+		msgStartPlay.leader = m_playerTurn;
+		BroadcastGameMessage<MessageStartPlay>(msgStartPlay);
+
+		m_matchState = MatchState::PLAYING;
+
+		// Play card on behalf of computer player
+		if (m_playerSeatsComputer[m_playerTurn])
+			ProcessPlayCard(m_playerTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTurn], m_spadesBroken));
+	}
+}
+
+void
+SpadesMatch::ProcessPlayCard(int16 seat, Card card)
+{
+	using namespace Spades;
+
+	assert(m_matchState == MatchState::PLAYING);
+
+	CardArray& cards = m_playerCards[seat];
+
+	assert(!(!m_spadesBroken && m_currentTrick.IsEmpty() && GetXPCardValueSuit(card) == CardSuit::SPADES));
+	assert(m_currentTrick.FollowsSuit(card, cards));
+
+	cards.erase(std::remove(cards.begin(), cards.end(), card), cards.end());
+
+	if (!m_spadesBroken && !m_currentTrick.IsEmpty() && GetXPCardValueSuit(card) == CardSuit::SPADES)
+		m_spadesBroken = true;
+
+	m_currentTrick.Set(seat, card);
+	if (++m_playerTrickTurn >= 4)
+		m_playerTrickTurn = 0;
+
+	MsgPlay msgPlay;
+	msgPlay.seat = seat;
+	msgPlay.nextPlayer = m_playerTrickTurn;
+	msgPlay.card = card;
+	BroadcastGameMessage<MessagePlay>(msgPlay);
+
+	if (m_currentTrick.IsFinished())
+	{
+		m_playerTurn = m_currentTrick.GetWinner();
+		++m_playerTricksTaken[m_playerTurn];
+
+		if (cards.empty())
+		{
+			const std::array<TrickScore, 2> score =
+				CalculateTrickScore(m_playerBids, m_playerTricksTaken, m_teamBags, MsgBid::BID_DOUBLE_NIL, false);
+			m_teamPoints[0] += score[0].points;
+			m_teamPoints[1] += score[1].points;
+			m_teamBags[0] = score[0].bags;
+			m_teamBags[1] = score[1].bags;
+
+			MsgEndHand msgEndHand;
+			msgEndHand.points[0] = score[0].points;
+			msgEndHand.points[1] = score[1].points;
+			msgEndHand.bags[0] = score[0].bags;
+			msgEndHand.bags[1] = score[1].bags;
+			msgEndHand.pointsBase[0] = score[0].pointsBase;
+			msgEndHand.pointsBase[1] = score[1].pointsBase;
+			msgEndHand.pointsNil[0] = score[0].pointsNil;
+			msgEndHand.pointsNil[1] = score[1].pointsNil;
+			msgEndHand.pointsBagBonus[0] = score[0].pointsBagBonus;
+			msgEndHand.pointsBagBonus[1] = score[1].pointsBagBonus;
+			msgEndHand.pointsBagPenalty[0] = score[0].pointsBagPenalty;
+			msgEndHand.pointsBagPenalty[1] = score[1].pointsBagPenalty;
+			BroadcastGameMessage<MessageEndHand>(msgEndHand);
+
+			ResetHand();
+
+			bool team1Winner = m_teamPoints[0] >= 500 || m_teamPoints[1] <= -200;
+			bool team2Winner = m_teamPoints[1] >= 500 || m_teamPoints[0] <= -200;
+			if (team1Winner || team2Winner)
+			{
+				if (team1Winner && team2Winner)
+					team1Winner = m_teamPoints[0] > m_teamPoints[1];
+
+				MsgEndGame msgEndGame;
+				msgEndGame.winners[team1Winner ? 0 : 1] = 1;
+				msgEndGame.winners[team1Winner ? 2 : 3] = 1;
+				BroadcastGameMessage<MessageEndGame>(msgEndGame);
+
+				m_matchState = MatchState::ENDED;
+				m_state = STATE_GAMEOVER;
+
+				// Request new game on behalf of computer players
+				if (m_players.size() < SpadesNumPlayers)
+				{
+					MsgNewGameVote msgNewGameVote;
+					for (int16 seat = 0; seat < SpadesNumPlayers; ++seat)
+					{
+						if (m_playerSeatsComputer[seat])
+						{
+							msgNewGameVote.seat = seat;
+							BroadcastGameMessage<MessageNewGameVote>(msgNewGameVote);
+
+							m_playersCheckedIn[seat] = true;
+						}
+					}
+				}
+			}
+			else
+			{
+				MsgStartBid msgStartBid;
+				msgStartBid.dealer = m_handDealer;
+				for (PlayerSocket* player : m_players)
+				{
+					const std::vector<Card>& cards = m_playerCards.at(player->m_seat);
+					for (BYTE y = 0; y < SpadesNumCardsInHand; ++y)
+						msgStartBid.hand[y] = cards[y];
+
+					player->OnMatchGameMessage<MessageStartBid>(msgStartBid);
+				}
+
+				m_matchState = MatchState::BIDDING;
+
+				// Bid on behalf of computer player
+				if (m_playerSeatsComputer[m_handDealer])
+					ProcessBid(m_handDealer, m_currentTrick.GetAutoBid(m_playerCards[m_handDealer]));
+			}
+			return;
+		}
+		else
+		{
+			m_playerTrickTurn = m_playerTurn;
+			m_currentTrick.Reset();
+		}
+	}
+
+	// Play card on behalf of computer player
+	if (m_playerSeatsComputer[m_playerTrickTurn])
+		ProcessPlayCard(m_playerTrickTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTrickTurn], m_spadesBroken));
 }
 
 
@@ -166,7 +364,7 @@ SpadesMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 				}
 				case MessageBid:
 				{
-					MsgBid msgBid = player.OnMatchAwaitGameMessage<MsgBid, MessageBid>();
+					const MsgBid msgBid = player.OnMatchAwaitGameMessage<MsgBid, MessageBid>();
 					if (msgBid.seat != player.m_seat)
 						throw std::runtime_error("Spades::MsgBid: Incorrect player seat!");
 					if ((msgBid.bid < 0 || msgBid.bid > 13) && msgBid.bid != MsgBid::BID_DOUBLE_NIL)
@@ -181,38 +379,27 @@ SpadesMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 					if (!moreBidsToSend)
 					{
 						if (player.m_seat != m_handDealer)
-							throw std::runtime_error("Spades::MessageBid: Final message is not by hand dealer!");
+							throw std::runtime_error("Spades::MsgBid: Final message is not by hand dealer!");
 						if (m_playerBids[m_handDealer] != msgBid.bid)
-							throw std::runtime_error("Spades::MessageBid: Final message by hand dealer does not contain the same bid!");
+							throw std::runtime_error("Spades::MsgBid: Final message by hand dealer does not contain the same bid!");
 
 						MsgStartPlay msgStartPlay;
 						msgStartPlay.leader = m_playerTurn;
 						BroadcastGameMessage<MessageStartPlay>(msgStartPlay);
 
 						m_matchState = MatchState::PLAYING;
+
+						// Play card on behalf of computer player
+						if (m_playerSeatsComputer[m_playerTurn])
+							ProcessPlayCard(m_playerTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTurn], m_spadesBroken));
+						return;
 					}
 					else if (m_playerBids[player.m_seat] != (msgBid.bid == MsgBid::BID_DOUBLE_NIL ? BID_HAND_START : BID_SHOWN_CARDS))
 					{
-						throw std::runtime_error("Spades::MessageBid: Incorrect bid state!");
+						throw std::runtime_error("Spades::MsgBid: Incorrect bid state!");
 					}
 
-					m_playerBids[player.m_seat] = msgBid.bid;
-
-					while (moreBidsToSend &&
-						m_playerBids[m_nextBidPlayer] != BID_SHOWN_CARDS &&
-						m_playerBids[m_nextBidPlayer] != BID_HAND_START)
-					{
-						msgBid.seat = m_nextBidPlayer;
-						msgBid.bid = m_playerBids[m_nextBidPlayer];
-
-						if (++m_nextBidPlayer >= 4)
-							m_nextBidPlayer = 0;
-
-						msgBid.nextBidder = m_nextBidPlayer;
-						BroadcastGameMessage<MessageBid>(msgBid);
-
-						moreBidsToSend = m_nextBidPlayer != m_handDealer;
-					}
+					ProcessBid(player.m_seat, msgBid.bid);
 					return;
 				}
 			}
@@ -220,120 +407,28 @@ SpadesMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		}
 		case MatchState::PLAYING:
 		{
-			switch (type)
+			if (type == MessagePlay)
 			{
-				case MessagePlay:
-				{
-					MsgPlay msgPlay = player.OnMatchAwaitGameMessage<MsgPlay, MessagePlay>();
-					if (msgPlay.seat != player.m_seat)
-						throw std::runtime_error("Spades::MsgPlay: Incorrect player seat!");
-					if (!IsValidXPCardValue(msgPlay.card))
-						throw std::runtime_error("Spades::MsgPlay: Invalid card!");
+				const MsgPlay msgPlay = player.OnMatchAwaitGameMessage<MsgPlay, MessagePlay>();
+				if (msgPlay.seat != player.m_seat)
+					throw std::runtime_error("Spades::MsgPlay: Incorrect player seat!");
 
-					if (msgPlay.seat != m_playerTrickTurn)
-						throw std::runtime_error("Spades::MessagePlay: Not this player's turn!");
+				if (player.m_seat != m_playerTrickTurn)
+					throw std::runtime_error("Spades::MessagePlay: Not this player's turn!");
 
-					CardArray& cards = m_playerCards[player.m_seat];
-					if (std::find(cards.begin(), cards.end(), msgPlay.card) == cards.end())
-						throw std::runtime_error("Spades::MessagePlay: Player does not possess provided card!");
-					if (!m_currentTrick.FollowsSuit(msgPlay.card, cards))
-						throw std::runtime_error("Spades::MessagePlay: Card does not follow suit!");
+				if (!IsValidXPCardValue(msgPlay.card))
+					throw std::runtime_error("Spades::MsgPlay: Invalid card!");
+				if (!m_spadesBroken && m_currentTrick.IsEmpty() && GetXPCardValueSuit(msgPlay.card) == CardSuit::SPADES)
+					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Cannot lead a Spade before Spades are broken!");
 
-					cards.erase(std::remove(cards.begin(), cards.end(), msgPlay.card), cards.end());
+				const CardArray& cards = m_playerCards[player.m_seat];
+				if (std::find(cards.begin(), cards.end(), msgPlay.card) == cards.end())
+					throw std::runtime_error("Spades::MessagePlay: Player does not possess provided card!");
+				if (!m_currentTrick.FollowsSuit(msgPlay.card, cards))
+					throw std::runtime_error("Spades::MessagePlay: Card does not follow suit!");
 
-					m_currentTrick.Set(player.m_seat, msgPlay.card);
-					if (++m_playerTrickTurn >= 4)
-						m_playerTrickTurn = 0;
-
-					msgPlay.nextPlayer = m_playerTrickTurn;
-					BroadcastGameMessage<MessagePlay>(msgPlay);
-
-					if (m_currentTrick.IsFinished())
-					{
-						m_playerTurn = m_currentTrick.GetWinner();
-						++m_playerTricksTaken[m_playerTurn];
-
-						if (cards.empty())
-						{
-							const std::array<TrickScore, 2> score =
-								CalculateTrickScore(m_playerBids, m_playerTricksTaken, m_teamBags, MsgBid::BID_DOUBLE_NIL, false);
-							m_teamPoints[0] += score[0].points;
-							m_teamPoints[1] += score[1].points;
-							m_teamBags[0] = score[0].bags;
-							m_teamBags[1] = score[1].bags;
-
-							MsgEndHand msgEndHand;
-							msgEndHand.points[0] = score[0].points;
-							msgEndHand.points[1] = score[1].points;
-							msgEndHand.bags[0] = score[0].bags;
-							msgEndHand.bags[1] = score[1].bags;
-							msgEndHand.pointsBase[0] = score[0].pointsBase;
-							msgEndHand.pointsBase[1] = score[1].pointsBase;
-							msgEndHand.pointsNil[0] = score[0].pointsNil;
-							msgEndHand.pointsNil[1] = score[1].pointsNil;
-							msgEndHand.pointsBagBonus[0] = score[0].pointsBagBonus;
-							msgEndHand.pointsBagBonus[1] = score[1].pointsBagBonus;
-							msgEndHand.pointsBagPenalty[0] = score[0].pointsBagPenalty;
-							msgEndHand.pointsBagPenalty[1] = score[1].pointsBagPenalty;
-							BroadcastGameMessage<MessageEndHand>(msgEndHand);
-
-							ResetHand();
-
-							bool team1Winner = m_teamPoints[0] >= 500 || m_teamPoints[1] <= -200;
-							bool team2Winner = m_teamPoints[1] >= 500 || m_teamPoints[0] <= -200;
-							if (team1Winner || team2Winner)
-							{
-								if (team1Winner && team2Winner)
-									team1Winner = m_teamPoints[0] > m_teamPoints[1];
-
-								MsgEndGame msgEndGame;
-								msgEndGame.winners[team1Winner ? 0 : 1] = 1;
-								msgEndGame.winners[team1Winner ? 2 : 3] = 1;
-								BroadcastGameMessage<MessageEndGame>(msgEndGame);
-
-								m_matchState = MatchState::ENDED;
-								m_state = STATE_GAMEOVER;
-
-								// Request new game on behalf of computer players
-								if (m_players.size() < SpadesNumPlayers)
-								{
-									MsgNewGameVote msgNewGameVote;
-									for (int16 seat = 0; seat < SpadesNumPlayers; ++seat)
-									{
-										if (m_playerSeatsComputer[seat])
-										{
-											msgNewGameVote.seat = seat;
-											BroadcastGameMessage<MessageNewGameVote>(msgNewGameVote);
-
-											m_playersCheckedIn[seat] = true;
-										}
-									}
-								}
-							}
-							else
-							{
-								MsgStartBid msgStartBid;
-								msgStartBid.dealer = m_handDealer;
-								for (PlayerSocket* player : m_players)
-								{
-									const std::vector<Card>& cards = m_playerCards.at(player->m_seat);
-									for (BYTE y = 0; y < SpadesNumCardsInHand; ++y)
-										msgStartBid.hand[y] = cards[y];
-
-									player->OnMatchGameMessage<MessageStartBid>(msgStartBid);
-								}
-
-								m_matchState = MatchState::BIDDING;
-							}
-						}
-						else
-						{
-							m_playerTrickTurn = m_playerTurn;
-							m_currentTrick.Reset();
-						}
-					}
-					return;
-				}
+				ProcessPlayCard(player.m_seat, msgPlay.card);
+				return;
 			}
 			break;
 		}
@@ -341,7 +436,7 @@ SpadesMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		{
 			if (type == MessageNewGameVote)
 			{
-				MsgNewGameVote msgNewGameVote = player.OnMatchAwaitGameMessage<MsgNewGameVote, MessageNewGameVote>();
+				const MsgNewGameVote msgNewGameVote = player.OnMatchAwaitGameMessage<MsgNewGameVote, MessageNewGameVote>();
 				if (msgNewGameVote.seat != player.m_seat)
 					throw std::runtime_error("Spades::MsgNewGameVote: Incorrect player seat!");
 
@@ -415,11 +510,24 @@ SpadesMatch::OnReplacePlayer(const PlayerSocket& player, uint32 userIDNew)
 	msgReplacePlayer.seat = player.m_seat;
 	BroadcastGameMessage<MessageReplacePlayer>(msgReplacePlayer);
 
+	// If needed, interact with the match on behalf of the new computer player
 	switch (m_matchState)
 	{
 		case MatchState::INITIALIZING:
 		{
 			RegisterCheckIn(player.m_seat);
+			break;
+		}
+		case MatchState::BIDDING:
+		{
+			if (m_nextBidPlayer == player.m_seat)
+				ProcessBid(player.m_seat, m_currentTrick.GetAutoBid(m_playerCards[player.m_seat]));
+			break;
+		}
+		case MatchState::PLAYING:
+		{
+			if (m_playerTrickTurn == player.m_seat)
+				ProcessPlayCard(player.m_seat, m_currentTrick.GetAutoCard(m_playerCards[player.m_seat], m_spadesBroken));
 			break;
 		}
 		case MatchState::ENDED:
