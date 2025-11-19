@@ -168,11 +168,11 @@ MatchManager::DestroyMatch(unsigned int index)
 
 	GUID matchGUID;
 
-	auto it7 = std::remove_if(m_matches_win7.begin(), m_matches_win7.end(),
+	auto it7 = std::find_if(m_matches_win7.begin(), m_matches_win7.end(),
 		[index](const auto& m) { return m->GetIndex() == index; });
 	if (it7 == m_matches_win7.end())
 	{
-		auto itXP = std::remove_if(m_matches_winxp.begin(), m_matches_winxp.end(),
+		auto itXP = std::find_if(m_matches_winxp.begin(), m_matches_winxp.end(),
 			[index](const auto& m) { return m->GetIndex() == index; });
 		if (itXP != m_matches_winxp.end())
 		{
@@ -180,7 +180,7 @@ MatchManager::DestroyMatch(unsigned int index)
 			matchGUID = match->GetGUID();
 
 			SessionLog() << "[MATCH MANAGER] Closing Windows XP " << WinXP::Match::GameToNameString(match->GetGame())
-				<< " match " << match->GetGUID() << " per request!" << std::endl;
+				<< " match " << matchGUID << " per request!" << std::endl;
 
 			switch (WaitForSingleObject(match->m_mutex, SOCKET_TIMEOUT_MS + 10000))
 			{
@@ -208,7 +208,7 @@ MatchManager::DestroyMatch(unsigned int index)
 		matchGUID = match->GetGUID();
 
 		SessionLog() << "[MATCH MANAGER] Closing Windows 7 " << Win7::Match::GameToNameString(match->GetGame())
-			<< " match " << match->GetGUID() << " per request!" << std::endl;
+			<< " match " << matchGUID << " per request!" << std::endl;
 
 		switch (WaitForSingleObject(match->m_mutex, SOCKET_TIMEOUT_MS + 10000))
 		{
