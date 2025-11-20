@@ -185,10 +185,10 @@ Match::DisconnectedPlayer(PlayerSocket& player)
 			msgPlayerReplaced.userIDNew = userID;
 			BroadcastGenericMessage<MessagePlayerReplaced>(msgPlayerReplaced);
 
-			OnReplacePlayer(player, userID);
-
 			m_playerSeatsComputer[player.m_seat] = true;
 			m_playerComputerIDs[player.m_seat] = userID;
+
+			OnReplacePlayer(player, userID);
 		}
 #if not MATCH_NO_DISCONNECT_ON_PLAYER_LEAVE
 		else

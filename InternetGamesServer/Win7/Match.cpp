@@ -179,9 +179,9 @@ Match::DisconnectedPlayer(PlayerSocket& player)
 			for (PlayerSocket* p : m_players)
 				p->OnEventReceive(replaceWithAIXML);
 
-			OnReplacePlayer(player);
-
 			m_playerSeatsComputer[player.m_role] = true;
+
+			OnReplacePlayer(player);
 		}
 #if not MATCH_NO_DISCONNECT_ON_PLAYER_LEAVE
 		else
