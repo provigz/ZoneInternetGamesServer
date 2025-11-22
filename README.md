@@ -112,17 +112,17 @@ Each game has custom messages, which are supported by the server in order for it
 >
 > For all games, there are differences from original server behaviour:
 >
-> * **If an opponent leaves the game, instead of replacing them with an AI player, the server ends the game.**
+> * **If an opponent leaves a Windows 7 Backgammon or Checkers game, instead of replacing them with an AI player, the server ends the game.**
 >
->   The reason for this is that AI player logic has originally been developed server-side.
->   Since this server does not support game logic, they cannot be supported, hence the match is ended
->   by disconnecting all players, causing "Error communicating with server" and "Your opponent has left the game"
->   error messages on Windows 7 and XP/ME game clients respectively.
+>   AI player logic was originally developed server-side. Originally, all three Windows 7 games and Spades and Hearts from Windows XP/ME supported them.
+>   This server does not currently support game logic for Backgammon and Checkers, so computer players are not currently supported for those games.
+>   Instead, the match is ended by disconnecting the other player, causing an "Error communicating with server" error message.
 >
-> * **Since the server does not support game logic, it will send over any valid event messages, regardless of their legitimacy.**
+> * **Since the server does not support game logic everywhere, it may not entirely validate some messages from clients.**
 >
->   If a player were to modify event messages being sent to the server to try and cheat, it's up to the opponents' game clients to determine whether the actions are legitimate or not.
+>   If a player were to modify game messages being sent to the server to try and cheat, in some cases it might be up to the opponents' game clients to determine whether the action/s are legitimate or not.
 >   Luckily, from my testing, this local validation seems to work nicely. On invalid data, the game ends with a "Corrupted data" message.
+>   If the server catches an invalid message, the player in question will be disconnected. The game should continue if it supports computer players.
 
 #### Command line arguments
 

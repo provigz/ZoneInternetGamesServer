@@ -16,12 +16,12 @@ static uint8_t GetXPCardValueRank(int8_t value)
 
 static bool IsValidXPCardValue(int8_t value)
 {
-	return value >= 0 && value < SpadesNumCardsInHand * 4;
+	return value >= 0 && value < SpadesNumCardsInHand * SpadesNumSuits;
 }
 
 namespace WinXP {
 
-static const std::uniform_int_distribution<> s_playerDistribution(0, 3);
+static const std::uniform_int_distribution<> s_playerDistribution(0, SpadesNumPlayers - 1);
 
 SpadesMatch::SpadesMatch(unsigned int index, PlayerSocket& player) :
 	Match(index, player),
@@ -153,7 +153,8 @@ SpadesMatch::ProcessBid(int16 seat, int8_t bid)
 
 		// Play card on behalf of computer player
 		if (m_playerSeatsComputer[m_playerTurn])
-			ProcessPlayCard(m_playerTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTurn], m_spadesBroken));
+			ProcessPlayCard(m_playerTurn,
+				m_currentTrick.GetAutoCard<MsgBid::BID_DOUBLE_NIL>(m_playerCards[m_playerTurn], m_playerBids[m_playerTurn], m_spadesBroken));
 		return;
 	}
 
@@ -192,7 +193,8 @@ SpadesMatch::ProcessBid(int16 seat, int8_t bid)
 
 		// Play card on behalf of computer player
 		if (m_playerSeatsComputer[m_playerTurn])
-			ProcessPlayCard(m_playerTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTurn], m_spadesBroken));
+			ProcessPlayCard(m_playerTurn,
+				m_currentTrick.GetAutoCard<MsgBid::BID_DOUBLE_NIL>(m_playerCards[m_playerTurn], m_playerBids[m_playerTurn], m_spadesBroken));
 	}
 }
 
@@ -205,7 +207,9 @@ SpadesMatch::ProcessPlayCard(int16 seat, Card card)
 
 	CardArray& cards = m_playerCards[seat];
 
-	assert(!(!m_spadesBroken && m_currentTrick.IsEmpty() && GetXPCardValueSuit(card) == CardSuit::SPADES));
+	assert(!(!m_spadesBroken && m_currentTrick.IsEmpty() &&
+		GetXPCardValueSuit(card) == CardSuit::SPADES &&
+		std::any_of(cards.begin(), cards.end(), [](Card c) { return GetXPCardValueSuit(c) != CardSuit::SPADES; })));
 	assert(m_currentTrick.FollowsSuit(card, cards));
 
 	cards.erase(std::remove(cards.begin(), cards.end(), card), cards.end());
@@ -315,7 +319,8 @@ SpadesMatch::ProcessPlayCard(int16 seat, Card card)
 
 	// Play card on behalf of computer player
 	if (m_playerSeatsComputer[m_playerTrickTurn])
-		ProcessPlayCard(m_playerTrickTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTrickTurn], m_spadesBroken));
+		ProcessPlayCard(m_playerTrickTurn,
+			m_currentTrick.GetAutoCard<MsgBid::BID_DOUBLE_NIL>(m_playerCards[m_playerTrickTurn], m_playerBids[m_playerTrickTurn], m_spadesBroken));
 }
 
 
@@ -391,7 +396,8 @@ SpadesMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 
 						// Play card on behalf of computer player
 						if (m_playerSeatsComputer[m_playerTurn])
-							ProcessPlayCard(m_playerTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTurn], m_spadesBroken));
+							ProcessPlayCard(m_playerTurn,
+								m_currentTrick.GetAutoCard<MsgBid::BID_DOUBLE_NIL>(m_playerCards[m_playerTurn], m_playerBids[m_playerTurn], m_spadesBroken));
 						return;
 					}
 					else if (m_playerBids[player.m_seat] != (msgBid.bid == MsgBid::BID_DOUBLE_NIL ? BID_HAND_START : BID_SHOWN_CARDS))
@@ -418,12 +424,18 @@ SpadesMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 
 				if (!IsValidXPCardValue(msgPlay.card))
 					throw std::runtime_error("Spades::MsgPlay: Invalid card!");
-				if (!m_spadesBroken && m_currentTrick.IsEmpty() && GetXPCardValueSuit(msgPlay.card) == CardSuit::SPADES)
-					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Cannot lead a Spade before Spades are broken!");
 
 				const CardArray& cards = m_playerCards[player.m_seat];
 				if (std::find(cards.begin(), cards.end(), msgPlay.card) == cards.end())
 					throw std::runtime_error("Spades::MessagePlay: Player does not possess provided card!");
+
+				if (!m_spadesBroken && m_currentTrick.IsEmpty() &&
+					GetXPCardValueSuit(msgPlay.card) == CardSuit::SPADES &&
+					std::any_of(cards.begin(), cards.end(), [](Card c) { return GetXPCardValueSuit(c) != CardSuit::SPADES; }))
+				{
+					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Tried to lead a Spade before Spades are broken!");
+				}
+
 				if (!m_currentTrick.FollowsSuit(msgPlay.card, cards))
 					throw std::runtime_error("Spades::MessagePlay: Card does not follow suit!");
 
@@ -527,7 +539,8 @@ SpadesMatch::OnReplacePlayer(const PlayerSocket& player, uint32 userIDNew)
 		case MatchState::PLAYING:
 		{
 			if (m_playerTrickTurn == player.m_seat)
-				ProcessPlayCard(player.m_seat, m_currentTrick.GetAutoCard(m_playerCards[player.m_seat], m_spadesBroken));
+				ProcessPlayCard(player.m_seat,
+					m_currentTrick.GetAutoCard<MsgBid::BID_DOUBLE_NIL>(m_playerCards[player.m_seat], m_playerBids[player.m_seat], m_spadesBroken));
 			break;
 		}
 		case MatchState::ENDED:

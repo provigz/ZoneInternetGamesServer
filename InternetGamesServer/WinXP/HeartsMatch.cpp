@@ -8,23 +8,24 @@ typedef int8_t Card;
 
 enum class CardSuit
 {
+	NONE = -1,
 	CLUBS = 0,
 	DIAMONDS = 1,
 	SPADES = 2,
 	HEARTS = 3
 };
 
-static CardSuit GetXPCardValueSuit(Card value)
+static inline CardSuit GetXPCardValueSuit(Card value)
 {
 	return static_cast<CardSuit>(value / HeartsNumCardsInHand);
 }
 
-static uint8_t GetXPCardValueRank(Card value)
+static inline uint8_t GetXPCardValueRank(Card value)
 {
 	return static_cast<uint8_t>(value % HeartsNumCardsInHand);
 }
 
-static bool IsValidXPCardValue(Card value)
+static inline bool IsValidXPCardValue(Card value)
 {
 	return value >= 0 && value < HeartsNumCardsInHand * 4;
 }
@@ -32,11 +33,7 @@ static bool IsValidXPCardValue(Card value)
 
 namespace WinXP {
 
-static std::array<Card, HeartsNumCardsInPass> HeartsGetAutoPass(const std::vector<Card>& hand)
-{
-	// TODO!
-	return { hand[0], hand[1], hand[2] };
-}
+static std::array<Card, HeartsNumCardsInPass> HeartsGetAutoPass(const std::vector<Card>& hand);
 
 
 HeartsMatch::CardTrick::CardTrick() :
@@ -80,7 +77,7 @@ HeartsMatch::CardTrick::FollowsSuit(Card card, const CardArray& hand) const
 		return true;
 
 	return std::none_of(hand.begin(), hand.end(),
-		[this, leadSuit](Card pCard)
+		[leadSuit](Card pCard)
 		{
 			return GetXPCardValueSuit(pCard) == leadSuit;
 		});
@@ -138,41 +135,134 @@ HeartsMatch::CardTrick::GetPoints() const
 Card
 HeartsMatch::CardTrick::GetAutoCard(const std::vector<Card>& hand, bool pointsBroken) const
 {
-	// TODO! This is temporary/unfinished
-	for (Card card : hand)
+	assert(!IsFinished());
+
+	if (m_leadCard == HeartsUnsetCard) // Playing lead card?
 	{
-		if (!FollowsSuit(card, hand))
+		if (hand.size() >= HeartsNumCardsInHand) // First trick?
+		{
+			assert(std::find(hand.begin(), hand.end(), HeartsCard2C) != hand.end());
+			return HeartsCard2C;
+		}
+		if (!pointsBroken && std::any_of(hand.begin(), hand.end(),
+				[](Card c) { return GetXPCardValueSuit(c) != CardSuit::HEARTS; }))
+		{
+			// Pick highest non-Heart
+			Card card = HeartsUnsetCard;
+			int8_t highestRank = -1;
+			for (Card c : hand)
+			{
+				if (GetXPCardValueSuit(c) == CardSuit::HEARTS)
+					continue;
+
+				const uint8_t rank = GetXPCardValueRank(c);
+				if (rank > highestRank)
+				{
+					card = c;
+					highestRank = rank;
+				}
+			}
+			if (card != HeartsUnsetCard)
+				return card;
+		}
+	}
+	else // Not playing lead card.
+	{
+		// Follow lead suit, if we have a card with such suit
+		const CardSuit leadSuit = GetXPCardValueSuit(m_leadCard);
+		if (std::any_of(hand.begin(), hand.end(), [this, leadSuit](Card pCard) { return GetXPCardValueSuit(pCard) == leadSuit; }))
+		{
+			Card card = HeartsUnsetCard;
+			const int8_t rankUnder = GetCardHighestPlayedRank(static_cast<int8_t>(leadSuit));
+			int8_t highestRank = -1;
+			for (Card c : hand)
+			{
+				if (GetXPCardValueSuit(c) != leadSuit)
+					continue;
+
+				const uint8_t rank = GetXPCardValueRank(c);
+				if (rank < rankUnder && rank > highestRank)
+				{
+					card = c;
+					highestRank = rank;
+				}
+			}
+			if (card == HeartsUnsetCard)
+			{
+				for (Card c : hand)
+				{
+					if (GetXPCardValueSuit(c) != leadSuit)
+						continue;
+
+					const uint8_t rank = GetXPCardValueRank(c);
+					if (rank > highestRank)
+					{
+						card = c;
+						highestRank = rank;
+					}
+				}
+			}
+			assert(card != HeartsUnsetCard);
+			return card;
+		}
+
+		if (hand.size() >= HeartsNumCardsInHand) // First trick?
+		{
+			// Pick highest non-point card, which follows suit
+			Card card = HeartsUnsetCard;
+			int8_t highestRank = -1;
+			for (Card c : hand)
+			{
+				if (c == HeartsCardQS || GetXPCardValueSuit(c) == CardSuit::HEARTS)
+					continue;
+				if (!FollowsSuit(c, hand))
+					continue;
+
+				const uint8_t rank = GetXPCardValueRank(c);
+				if (rank > highestRank)
+				{
+					card = c;
+					highestRank = rank;
+				}
+			}
+			if (card != HeartsUnsetCard)
+				return card;
+		}
+	}
+
+	// Pick highest card
+	Card card = HeartsUnsetCard;
+	int8_t highestRank = -1;
+	for (Card c : hand)
+	{
+		const uint8_t rank = GetXPCardValueRank(c);
+		if (rank > highestRank)
+		{
+			card = c;
+			highestRank = rank;
+		}
+	}
+	assert(card != HeartsUnsetCard);
+	return card;
+}
+
+uint8_t
+HeartsMatch::CardTrick::GetCardHighestPlayedRank(int8_t suit) const
+{
+	if (m_leadCard == HeartsUnsetCard)
+		return -1;
+
+	int8_t highestRank = -1;
+	for (Card c : m_playerCards)
+	{
+		if (GetXPCardValueSuit(c) != static_cast<CardSuit>(suit))
 			continue;
 
-		if (m_leadCard == HeartsUnsetCard) // Playing lead card?
-		{
-			if (hand.size() >= HeartsNumCardsInHand) // First trick?
-			{
-				if (card != HeartsCard2C)
-					continue;
-			}
-			else if (!pointsBroken && GetXPCardValueSuit(card) == CardSuit::HEARTS)
-			{
-				if (std::any_of(hand.begin(), hand.end(), [](Card c) { return GetXPCardValueSuit(c) != CardSuit::HEARTS; }))
-					continue;
-			}
-		}
-		else if (hand.size() >= HeartsNumCardsInHand) // Not playing lead card. First trick?
-		{
-			if (card == HeartsCardQS)
-			{
-				continue;
-			}
-			else if (GetXPCardValueSuit(card) == CardSuit::HEARTS)
-			{
-				if (std::any_of(hand.begin(), hand.end(), [](Card c) { return GetXPCardValueSuit(c) != CardSuit::HEARTS; }))
-					continue;
-			}
-		}
-
-		return card;
+		const uint8_t rank = GetXPCardValueRank(c);
+		if (rank > highestRank)
+			highestRank = rank;
 	}
-	return 0;
+	return highestRank;
 }
 
 
@@ -235,7 +325,8 @@ HeartsMatch::RegisterCheckIn(int16 seat)
 	{
 		m_playersCheckedIn = {};
 		m_state = STATE_PLAYING;
-		m_matchState = MatchState::PASSING;
+
+		Reset();
 
 		MsgStartGame msgStartGame;
 		for (PlayerSocket* p : m_players)
@@ -271,6 +362,7 @@ HeartsMatch::ProcessPass(int16 seat, std::array<Card, HeartsNumCardsInPass> pass
 	using namespace Hearts;
 
 	assert(m_matchState == MatchState::PASSING);
+	assert(passCards[0] != passCards[1] && passCards[1] != passCards[2]);
 
 	const int16 passReceiver = (seat + m_passDirection) % HeartsNumPlayers;
 	CardArray& cards = m_playerCards[seat];
@@ -340,8 +432,13 @@ HeartsMatch::ProcessPlayCard(int16 seat, Card card)
 
 	CardArray& cards = m_playerCards[seat];
 
-	assert(!(!m_pointsBroken && m_currentTrick.IsEmpty() && GetXPCardValueSuit(card) == CardSuit::HEARTS));
 	assert(m_currentTrick.FollowsSuit(card, cards));
+
+	assert(!(!m_pointsBroken && m_currentTrick.IsEmpty() &&
+		GetXPCardValueSuit(card) == CardSuit::HEARTS &&
+		std::any_of(cards.begin(), cards.end(), [](Card c) { return GetXPCardValueSuit(c) != CardSuit::HEARTS; })));
+	assert(!(m_currentTrick.IsEmpty() && cards.size() >= HeartsNumCardsInHand && card != HeartsCard2C));
+	assert(!(cards.size() >= HeartsNumCardsInHand && (card == HeartsCardQS || GetXPCardValueSuit(card) == CardSuit::HEARTS)));
 
 	cards.erase(std::remove(cards.begin(), cards.end(), card), cards.end());
 
@@ -502,6 +599,8 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 				const MsgPass msgPass = player.OnMatchAwaitGameMessage<MsgPass, MessagePass>();
 				if (msgPass.seat != player.m_seat)
 					throw std::runtime_error("Hearts::MsgPass: Incorrect player seat!");
+				if (msgPass.cards[0] == msgPass.cards[1] || msgPass.cards[1] == msgPass.cards[2])
+					throw std::runtime_error("Hearts::MsgPass: Repeating cards!");
 
 				if (m_playersPassedCards[player.m_seat])
 					throw std::runtime_error("Hearts::MessagePass: Player has already passed cards!");
@@ -675,6 +774,125 @@ HeartsMatch::OnReplacePlayer(const PlayerSocket& player, uint32 userIDNew)
 			break;
 		}
 	}
+}
+
+
+static std::array<Card, HeartsNumCardsInPass> HeartsGetAutoPass(const std::vector<Card>& hand)
+{
+	// Could have received cards from another player
+	assert(hand.size() >= HeartsNumCardsInHand && hand.size() <= HeartsNumCardsInHand + HeartsNumCardsInPass);
+
+	std::array<Card, HeartsNumCardsInPass> passCards;
+	int8_t prevPassCardIdx = -1;
+
+	std::array<std::vector<Card>, HeartsNumSuits> cardsBySuits;
+	for (int8_t i = 0; i < HeartsNumCardsInHand; ++i)
+		cardsBySuits[static_cast<int8_t>(GetXPCardValueSuit(hand[i]))].push_back(hand[i]);
+
+#define CHECK_FOR_CARD(arr, card) \
+	if (std::find(arr.begin(), arr.end(), card) != arr.end()) \
+	{ \
+		passCards[++prevPassCardIdx] = card; \
+		arr.erase(std::remove(arr.begin(), arr.end(), card), arr.end()); \
+	}
+
+	// 1. Get rid of top dangerous Spades
+	std::vector<Card>& spades = cardsBySuits[static_cast<int8_t>(CardSuit::SPADES)];
+	if (std::find(spades.begin(), spades.end(), HeartsCardQS) != spades.end())
+	{
+		passCards[++prevPassCardIdx] = HeartsCardQS; // Queen Spade
+		spades.erase(std::remove(spades.begin(), spades.end(), HeartsCardQS), spades.end());
+
+		CHECK_FOR_CARD(spades, HeartsCardQS + 1) // King Spade
+		CHECK_FOR_CARD(spades, HeartsCardQS + 2) // Ace of Spades
+	}
+	if (prevPassCardIdx >= 2) return passCards;
+
+#undef CHECK_FOR_CARD
+#define CHECK_FOR_CARD(arr, card) \
+	if (std::find(arr.begin(), arr.end(), card) != arr.end()) \
+	{ \
+		passCards[++prevPassCardIdx] = card; \
+		arr.erase(std::remove(arr.begin(), arr.end(), card), arr.end()); \
+		if (prevPassCardIdx >= 2) return passCards; \
+	}
+
+	// 2. Get rid of A, K, Q in short suits
+	std::vector<Card>& clubs = cardsBySuits[static_cast<int8_t>(CardSuit::CLUBS)];
+	if (clubs.size() <= 3)
+	{
+		CHECK_FOR_CARD(clubs, HeartsCardQC + 2) // Ace of Clubs
+		CHECK_FOR_CARD(clubs, HeartsCardQC + 1) // King Club
+		CHECK_FOR_CARD(clubs, HeartsCardQC) // Queen Club
+	}
+	std::vector<Card>& diamonds = cardsBySuits[static_cast<int8_t>(CardSuit::DIAMONDS)];
+	if (diamonds.size() <= 3)
+	{
+		CHECK_FOR_CARD(diamonds, HeartsCardQD + 2) // Ace of Diamonds
+		CHECK_FOR_CARD(diamonds, HeartsCardQD + 1) // King Diamonds
+		CHECK_FOR_CARD(diamonds, HeartsCardQD) // Queen Diamonds
+	}
+
+	// 3. Get rid of high Hearts (they take tricks once Hearts break)
+	std::vector<Card>& hearts = cardsBySuits[static_cast<int8_t>(CardSuit::HEARTS)];
+	CHECK_FOR_CARD(hearts, HeartsCardQH + 2) // Ace of Hearts
+	CHECK_FOR_CARD(hearts, HeartsCardQH + 1) // King Hearts
+	CHECK_FOR_CARD(hearts, HeartsCardQH) // Queen Hearts
+
+	// 4. Get rid of mid-danger cards (they often win early-mid tricks)
+	CHECK_FOR_CARD(hearts, HeartsCardQH - 1) // Jack Heart
+	CHECK_FOR_CARD(spades, HeartsCardQS - 1) // Jack Spade
+	CHECK_FOR_CARD(diamonds, HeartsCardQD - 1) // Jack Diamond
+	CHECK_FOR_CARD(hearts, HeartsCardQH - 2) // 10 Heart
+	CHECK_FOR_CARD(spades, HeartsCardQS - 2) // 10 Spade
+	CHECK_FOR_CARD(diamonds, HeartsCardQD - 2) // 10 Diamond
+
+#undef CHECK_FOR_CARD
+
+	int8_t longestSuitIdx = -1;
+	size_t suitMaxCards = 0;
+	for (int8_t s = 0; s < HeartsNumSuits - 1; ++s) // Except Hearts
+	{
+		if (cardsBySuits[s].size() > suitMaxCards)
+		{
+			longestSuitIdx = s;
+			suitMaxCards = cardsBySuits[s].size();
+		}
+	}
+
+	if (suitMaxCards < HeartsNumCardsInPass - (prevPassCardIdx + 1)) // Is there no suit other than Hearts which has enough cards?
+	{
+		std::vector<Card>& longestSuit = cardsBySuits[longestSuitIdx];
+		while (!longestSuit.empty())
+		{
+			passCards[++prevPassCardIdx] = longestSuit[0];
+			longestSuit.erase(longestSuit.begin());
+		}
+
+		// Simply pass one or two Hearts to fill in pass requirement
+		longestSuitIdx = static_cast<int8_t>(CardSuit::HEARTS);
+	}
+
+	// 5. Get rid of low cards from longest suit
+	std::vector<Card>& longestSuit = cardsBySuits[longestSuitIdx];
+	while (prevPassCardIdx < 2)
+	{
+		Card card = HeartsUnsetCard;
+		int8_t lowestRank = HeartsNumCardsInHand;
+		for (Card c : longestSuit)
+		{
+			const uint8_t rank = GetXPCardValueRank(c);
+			if (rank < lowestRank)
+			{
+				card = c;
+				lowestRank = rank;
+			}
+		}
+		assert(card != HeartsUnsetCard);
+		passCards[++prevPassCardIdx] = card;
+		longestSuit.erase(std::remove(longestSuit.begin(), longestSuit.end(), card), longestSuit.end());
+	}
+	return passCards;
 }
 
 }

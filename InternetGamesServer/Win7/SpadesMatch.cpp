@@ -159,7 +159,8 @@ SpadesMatch::ProcessBid(int8_t role, int8_t bid)
 		if (m_playerSeatsComputer[m_playerTurn])
 		{
 			const std::vector<QueuedEvent> events =
-				ProcessPlayCard(m_playerTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTurn], m_spadesBroken));
+				ProcessPlayCard(m_playerTurn,
+					m_currentTrick.GetAutoCard<BID_DOUBLE_NIL>(m_playerCards[m_playerTurn], m_playerBids[m_playerTurn], m_spadesBroken));
 			for (const QueuedEvent& ev : events)
 			{
 				if (!ev.xml.empty())
@@ -187,7 +188,9 @@ SpadesMatch::ProcessPlayCard(int8_t role, Card card)
 
 	CardArray& cards = m_playerCards[role];
 
-	assert(!(!m_spadesBroken && m_currentTrick.IsEmpty() && GetZPACardValueSuit(card) == CardSuit::SPADES));
+	assert(!(!m_spadesBroken && m_currentTrick.IsEmpty() &&
+		GetZPACardValueSuit(card) == CardSuit::SPADES &&
+		std::any_of(cards.begin(), cards.end(), [](Card c) { return GetZPACardValueSuit(c) != CardSuit::SPADES; })));
 	assert(m_currentTrick.FollowsSuit(card, cards));
 
 	cards.erase(std::remove(cards.begin(), cards.end(), card), cards.end());
@@ -287,7 +290,8 @@ SpadesMatch::ProcessPlayCard(int8_t role, Card card)
 	if (m_playerSeatsComputer[m_playerTrickTurn])
 	{
 		const std::vector<QueuedEvent> events =
-			ProcessPlayCard(m_playerTrickTurn, m_currentTrick.GetAutoCard(m_playerCards[m_playerTrickTurn], m_spadesBroken));
+			ProcessPlayCard(m_playerTrickTurn,
+				m_currentTrick.GetAutoCard<BID_DOUBLE_NIL>(m_playerCards[m_playerTrickTurn], m_playerBids[m_playerTrickTurn], m_spadesBroken));
 		for (const QueuedEvent& ev : events)
 		{
 			if (!ev.xml.empty())
@@ -387,12 +391,18 @@ SpadesMatch::ProcessEvent(const tinyxml2::XMLElement& elEvent, const PlayerSocke
 				}
 				if (!IsValidZPACardValue(card))
 					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Invalid card value!");
-				if (!m_spadesBroken && m_currentTrick.IsEmpty() && GetZPACardValueSuit(card) == CardSuit::SPADES)
-					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Cannot lead a Spade before Spades are broken!");
 
 				const CardArray& cards = m_playerCards[caller.m_role];
 				if (std::find(cards.begin(), cards.end(), card) == cards.end())
 					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Player does not possess provided card!");
+
+				if (!m_spadesBroken && m_currentTrick.IsEmpty() &&
+					GetZPACardValueSuit(card) == CardSuit::SPADES &&
+					std::any_of(cards.begin(), cards.end(), [](Card c) { return GetZPACardValueSuit(c) != CardSuit::SPADES; }))
+				{
+					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Tried to lead a Spade before Spades are broken!");
+				}
+
 				if (!m_currentTrick.FollowsSuit(card, cards))
 					throw std::runtime_error("SpadesMatch::ProcessEvent(): \"Move\": Card does not follow suit!");
 
@@ -421,7 +431,8 @@ SpadesMatch::OnReplacePlayer(const PlayerSocket& player)
 		case MatchState::PLAYING:
 		{
 			if (m_playerTrickTurn == player.m_role)
-				events = ProcessPlayCard(player.m_role, m_currentTrick.GetAutoCard(m_playerCards[player.m_role], m_spadesBroken));
+				events = ProcessPlayCard(player.m_role,
+					m_currentTrick.GetAutoCard<BID_DOUBLE_NIL>(m_playerCards[player.m_role], m_playerBids[player.m_role], m_spadesBroken));
 			break;
 		}
 	}

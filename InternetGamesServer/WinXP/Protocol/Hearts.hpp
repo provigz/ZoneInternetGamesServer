@@ -16,13 +16,17 @@ namespace Hearts {
 #define HeartsNumPlayers 4
 #define HeartsNumPointsInGame 100
 #define HeartsNumPointsInHand 26
+#define HeartsNumSuits 4
 #define HeartsNumCardsInHand 13
 #define HeartsNumCardsInPass 3
 #define HeartsPassDirections 4
 
 #define HeartsUnsetCard 0x7F
 #define HeartsCard2C 0
+#define HeartsCardQC 10
+#define HeartsCardQD 23
 #define HeartsCardQS 36
+#define HeartsCardQH 49
 
 enum
 {

@@ -26,7 +26,7 @@ protected:
 
 	void OnReplacePlayer(const PlayerSocket& player, uint32 userIDNew) override;
 
-private:
+public:
 	typedef int8_t Card;
 	typedef std::vector<Card> CardArray;
 
@@ -55,6 +55,9 @@ private:
 		int16 GetPoints() const;
 
 		Card GetAutoCard(const std::vector<Card>& hand, bool pointsBroken) const;
+
+	private:
+		uint8_t GetCardHighestPlayedRank(int8_t suit) const;
 
 	private:
 		Card m_leadCard;
