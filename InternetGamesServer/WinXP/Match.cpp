@@ -121,16 +121,16 @@ Match::JoinPlayer(PlayerSocket& player)
 	if (m_state != STATE_WAITINGFORPLAYERS)
 		return;
 
-	switch (WaitForSingleObject(m_mutex, SOCKET_TIMEOUT_MS + 10000))
+	switch (WaitForSingleObject(m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 	{
 		case WAIT_OBJECT_0: // Acquired ownership of the mutex
 			break;
 		case WAIT_TIMEOUT:
-			throw std::runtime_error("WinXP::Match::JoinPlayer(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::Match::JoinPlayer(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
 		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-			throw std::runtime_error("WinXP::Match::JoinPlayer(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::Match::JoinPlayer(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
 		default:
-			throw std::runtime_error("WinXP::Match::JoinPlayer(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::Match::JoinPlayer(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
 	}
 
 	AddPlayer(player);
@@ -141,22 +141,22 @@ Match::JoinPlayer(PlayerSocket& player)
 		p->OnMatchGenericMessage<MessageServerStatus>(msgServerStatus);
 
 	if (!ReleaseMutex(m_mutex))
-		throw std::runtime_error("WinXP::Match::JoinPlayer(): Couldn't release mutex: " + std::to_string(GetLastError()));
+		throw MutexError("WinXP::Match::JoinPlayer(): Couldn't release mutex: " + std::to_string(GetLastError()));
 }
 
 void
 Match::DisconnectedPlayer(PlayerSocket& player)
 {
-	switch (WaitForSingleObject(m_mutex, SOCKET_TIMEOUT_MS + 10000))
+	switch (WaitForSingleObject(m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 	{
 		case WAIT_OBJECT_0: // Acquired ownership of the mutex
 			break;
 		case WAIT_TIMEOUT:
-			throw std::runtime_error("WinXP::Match::DisconnectedPlayer(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::Match::DisconnectedPlayer(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
 		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-			throw std::runtime_error("WinXP::Match::DisconnectedPlayer(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::Match::DisconnectedPlayer(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
 		default:
-			throw std::runtime_error("WinXP::Match::DisconnectedPlayer(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::Match::DisconnectedPlayer(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
 	}
 
 	RemovePlayer(player);
@@ -217,7 +217,7 @@ Match::DisconnectedPlayer(PlayerSocket& player)
 	}
 
 	if (!ReleaseMutex(m_mutex))
-		throw std::runtime_error("WinXP::Match::DisconnectedPlayer(): Couldn't release mutex: " + std::to_string(GetLastError()));
+		throw MutexError("WinXP::Match::DisconnectedPlayer(): Couldn't release mutex: " + std::to_string(GetLastError()));
 }
 
 
@@ -280,37 +280,37 @@ Match::Update()
 void
 Match::ProcessMessage(const MsgChatSwitch& msg)
 {
-	switch (WaitForSingleObject(m_mutex, SOCKET_TIMEOUT_MS + 10000))
+	switch (WaitForSingleObject(m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 	{
 		case WAIT_OBJECT_0: // Acquired ownership of the mutex
 			break;
 		case WAIT_TIMEOUT:
-			throw std::runtime_error("WinXP::Match::ProcessMessage(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::Match::ProcessMessage(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
 		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-			throw std::runtime_error("WinXP::Match::ProcessMessage(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::Match::ProcessMessage(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
 		default:
-			throw std::runtime_error("WinXP::Match::ProcessMessage(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::Match::ProcessMessage(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
 	}
 
 	BroadcastGenericMessage<MessageChatSwitch>(msg);
 
 	if (!ReleaseMutex(m_mutex))
-		throw std::runtime_error("WinXP::Match::ProcessMessage(): Couldn't release mutex: " + std::to_string(GetLastError()));
+		throw MutexError("WinXP::Match::ProcessMessage(): Couldn't release mutex: " + std::to_string(GetLastError()));
 }
 
 void
 Match::ProcessIncomingGameMessage(PlayerSocket& player, uint32 type)
 {
-	switch (WaitForSingleObject(m_mutex, SOCKET_TIMEOUT_MS + 10000))
+	switch (WaitForSingleObject(m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 	{
 		case WAIT_OBJECT_0: // Acquired ownership of the mutex
 			break;
 		case WAIT_TIMEOUT:
-			throw std::runtime_error("WinXP::Match::ProcessIncomingGameMessage(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::Match::ProcessIncomingGameMessage(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
 		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-			throw std::runtime_error("WinXP::Match::ProcessIncomingGameMessage(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::Match::ProcessIncomingGameMessage(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
 		default:
-			throw std::runtime_error("WinXP::Match::ProcessIncomingGameMessage(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::Match::ProcessIncomingGameMessage(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
 	}
 
 	try
@@ -324,7 +324,7 @@ Match::ProcessIncomingGameMessage(PlayerSocket& player, uint32 type)
 	}
 
 	if (!ReleaseMutex(m_mutex))
-		throw std::runtime_error("WinXP::Match::ProcessIncomingGameMessage(): Couldn't release mutex: " + std::to_string(GetLastError()));
+		throw MutexError("WinXP::Match::ProcessIncomingGameMessage(): Couldn't release mutex: " + std::to_string(GetLastError()));
 }
 
 

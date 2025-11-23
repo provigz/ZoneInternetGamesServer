@@ -186,6 +186,12 @@ Socket::SocketHandler(void* socket_)
 			<< ": Client has been disconnected." << std::endl;
 		return 0;
 	}
+	catch (const MutexError& fatalErr)
+	{
+		std::cout << "[FATAL!] " << fatalErr.what();
+		SessionLog() << "[FATAL!] " << fatalErr.what();
+		throw;
+	}
 	catch (const std::exception& err)
 	{
 		SessionLog() << "[SOCKET] Error communicating with socket " << socket.m_address
@@ -258,25 +264,25 @@ Socket::Socket(SOCKET socket) :
 	m_type(UNKNOWN),
 	m_playerSocket(nullptr)
 {
-	switch (WaitForSingleObject(s_socketListMutex, 5000))
+	switch (WaitForSingleObject(s_socketListMutex, SOCKET_LIST_MUTEX_TIMEOUT_MS))
 	{
 		case WAIT_OBJECT_0: // Acquired ownership of the mutex
 			break;
 		case WAIT_TIMEOUT:
-			throw std::runtime_error("Socket::Socket(): Timed out waiting for socket list mutex: " + std::to_string(GetLastError()));
+			throw MutexError("Socket::Socket(): Timed out waiting for socket list mutex: " + std::to_string(GetLastError()));
 		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-			throw std::runtime_error("Socket::Socket(): Got ownership of an abandoned socket list mutex: " + std::to_string(GetLastError()));
+			throw MutexError("Socket::Socket(): Got ownership of an abandoned socket list mutex: " + std::to_string(GetLastError()));
 		default:
-			throw std::runtime_error("Socket::Socket(): An error occured waiting for socket list mutex: " + std::to_string(GetLastError()));
+			throw MutexError("Socket::Socket(): An error occured waiting for socket list mutex: " + std::to_string(GetLastError()));
 	}
 	s_socketList.push_back(this);
 	if (!ReleaseMutex(s_socketListMutex))
-		throw std::runtime_error("Socket::Socket(): Couldn't release socket list mutex: " + std::to_string(GetLastError()));
+		throw MutexError("Socket::Socket(): Couldn't release socket list mutex: " + std::to_string(GetLastError()));
 }
 
 Socket::~Socket()
 {
-	DWORD mutexResult = WaitForSingleObject(s_socketListMutex, 5000) == WAIT_OBJECT_0;
+	DWORD mutexResult = WaitForSingleObject(s_socketListMutex, SOCKET_LIST_MUTEX_TIMEOUT_MS) == WAIT_OBJECT_0;
 	assert(mutexResult && "Socket::~Socket(): Failed to acquire socket list mutex!");
 	s_socketList.erase(std::remove(s_socketList.begin(), s_socketList.end(), this), s_socketList.end());
 	mutexResult = ReleaseMutex(s_socketListMutex);

@@ -72,7 +72,7 @@ public:
 	template<uint32 Type, typename T>
 	void OnMatchGameMessage(const T& msgGame, int len = sizeof(T))
 	{
-		switch (WaitForSingleObject(m_acceptsGameMessagesEvent, SOCKET_TIMEOUT_MS + 10000))
+		switch (WaitForSingleObject(m_acceptsGameMessagesEvent, MATCH_MUTEX_TIMEOUT_MS))
 		{
 			case WAIT_OBJECT_0:
 				SendGameMessage<Type>(msgGame, len);
@@ -86,7 +86,7 @@ public:
 	template<uint32 Type, typename T, typename M, uint16 MessageLen> // Trailing data array after T
 	void OnMatchGameMessage(T msgGame, const Array<M, MessageLen>& msgGameSecond)
 	{
-		switch (WaitForSingleObject(m_acceptsGameMessagesEvent, SOCKET_TIMEOUT_MS + 10000))
+		switch (WaitForSingleObject(m_acceptsGameMessagesEvent, MATCH_MUTEX_TIMEOUT_MS))
 		{
 			case WAIT_OBJECT_0:
 				SendGameMessage<Type>(msgGame, msgGameSecond);
@@ -382,16 +382,16 @@ private:
 		MsgFooterGeneric msgFooterGeneric;
 		msgFooterGeneric.status = MsgFooterGeneric::STATUS_OK;
 
-		switch (WaitForSingleObject(m_genericMessageMutex, SOCKET_TIMEOUT_MS + 10000))
+		switch (WaitForSingleObject(m_genericMessageMutex, MATCH_MUTEX_TIMEOUT_MS))
 		{
 			case WAIT_OBJECT_0: // Acquired ownership of the mutex
 				break;
 			case WAIT_TIMEOUT:
-				throw std::runtime_error("WinXP::PlayerSocket::SendGenericMessage(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
+				throw MutexError("WinXP::PlayerSocket::SendGenericMessage(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
 			case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-				throw std::runtime_error("WinXP::PlayerSocket::SendGenericMessage(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
+				throw MutexError("WinXP::PlayerSocket::SendGenericMessage(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
 			default:
-				throw std::runtime_error("WinXP::PlayerSocket::SendGenericMessage(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
+				throw MutexError("WinXP::PlayerSocket::SendGenericMessage(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
 		}
 
 		try
@@ -408,7 +408,7 @@ private:
 		}
 
 		if (!ReleaseMutex(m_genericMessageMutex))
-			throw std::runtime_error("WinXP::PlayerSocket::SendGenericMessage(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::PlayerSocket::SendGenericMessage(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
 	}
 	template<uint32 Type, typename T>
 	void SendGameMessage(T msgGame, int len = AdjustedSize<T>)
@@ -446,16 +446,16 @@ private:
 		MsgFooterGeneric msgFooterGeneric;
 		msgFooterGeneric.status = MsgFooterGeneric::STATUS_OK;
 
-		switch (WaitForSingleObject(m_genericMessageMutex, SOCKET_TIMEOUT_MS + 10000))
+		switch (WaitForSingleObject(m_genericMessageMutex, MATCH_MUTEX_TIMEOUT_MS))
 		{
 			case WAIT_OBJECT_0: // Acquired ownership of the mutex
 				break;
 			case WAIT_TIMEOUT:
-				throw std::runtime_error("WinXP::PlayerSocket::SendGameMessage(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
+				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
 			case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-				throw std::runtime_error("WinXP::PlayerSocket::SendGameMessage(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
+				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
 			default:
-				throw std::runtime_error("WinXP::PlayerSocket::SendGameMessage(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
+				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
 		}
 
 		try
@@ -473,7 +473,7 @@ private:
 		}
 
 		if (!ReleaseMutex(m_genericMessageMutex))
-			throw std::runtime_error("WinXP::PlayerSocket::SendGameMessage(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
 	}
 	template<uint32 Type, typename T, typename M, uint16 MessageLen> // Trailing data array after T
 	typename std::enable_if_t<(sizeof(M) % sizeof(uint32) == 0), void>
@@ -517,16 +517,16 @@ private:
 		MsgFooterGeneric msgFooterGeneric;
 		msgFooterGeneric.status = MsgFooterGeneric::STATUS_OK;
 
-		switch (WaitForSingleObject(m_genericMessageMutex, SOCKET_TIMEOUT_MS + 10000))
+		switch (WaitForSingleObject(m_genericMessageMutex, MATCH_MUTEX_TIMEOUT_MS))
 		{
 			case WAIT_OBJECT_0: // Acquired ownership of the mutex
 				break;
 			case WAIT_TIMEOUT:
-				throw std::runtime_error("WinXP::PlayerSocket::SendGameMessage(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
+				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
 			case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-				throw std::runtime_error("WinXP::PlayerSocket::SendGameMessage(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
+				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
 			default:
-				throw std::runtime_error("WinXP::PlayerSocket::SendGameMessage(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
+				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
 		}
 
 		try
@@ -545,7 +545,7 @@ private:
 		}
 
 		if (!ReleaseMutex(m_genericMessageMutex))
-			throw std::runtime_error("WinXP::PlayerSocket::SendGameMessage(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
 	}
 	template<uint32 Type, typename T, typename M, uint16 MessageLen> // Trailing data array after T
 	typename std::enable_if_t<(sizeof(M) % sizeof(uint32) != 0), void>
@@ -595,16 +595,16 @@ private:
 		MsgFooterGeneric msgFooterGeneric;
 		msgFooterGeneric.status = MsgFooterGeneric::STATUS_OK;
 
-		switch (WaitForSingleObject(m_genericMessageMutex, SOCKET_TIMEOUT_MS + 10000))
+		switch (WaitForSingleObject(m_genericMessageMutex, MATCH_MUTEX_TIMEOUT_MS))
 		{
 			case WAIT_OBJECT_0: // Acquired ownership of the mutex
 				break;
 			case WAIT_TIMEOUT:
-				throw std::runtime_error("WinXP::PlayerSocket::SendGameMessage(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
+				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
 			case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-				throw std::runtime_error("WinXP::PlayerSocket::SendGameMessage(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
+				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
 			default:
-				throw std::runtime_error("WinXP::PlayerSocket::SendGameMessage(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
+				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
 		}
 
 		try
@@ -623,7 +623,7 @@ private:
 		}
 
 		if (!ReleaseMutex(m_genericMessageMutex))
-			throw std::runtime_error("WinXP::PlayerSocket::SendGameMessage(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
+			throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
 	}
 
 	/* Sending messages */

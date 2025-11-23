@@ -97,7 +97,7 @@ int main(int argc, char* argv[])
 		err << "Couldn't create a thread to update MatchManager: " << GetLastError() << std::endl;
 		std::cout << err.str();
 		SessionLog() << err.str();
-		return 1;
+		return 6;
 	}
 
 	/** SET UP WINSOCK */
@@ -131,7 +131,7 @@ int main(int argc, char* argv[])
 		SessionLog() << err.str();
 
 		WSACleanup();
-		return 1;
+		return 2;
 	}
 
 	// Set up the TCP listening socket
@@ -146,7 +146,7 @@ int main(int argc, char* argv[])
 
 		freeaddrinfo(result);
 		WSACleanup();
-		return 1;
+		return 3;
 	}
 	HRESULT bindResult = bind(ListenSocket, result->ai_addr, (int)result->ai_addrlen);
 	if (bindResult == SOCKET_ERROR)
@@ -159,7 +159,7 @@ int main(int argc, char* argv[])
 		freeaddrinfo(result);
 		closesocket(ListenSocket);
 		WSACleanup();
-		return 1;
+		return 4;
 	}
 	freeaddrinfo(result);
 
@@ -182,17 +182,21 @@ int main(int argc, char* argv[])
 
 		closesocket(ListenSocket);
 		WSACleanup();
-		return 1;
+		return 6;
 	}
 
-	std::string fatalError;
 	while (true)
 	{
 		// Listen for a client socket connection
 		if (listen(ListenSocket, SOMAXCONN) == SOCKET_ERROR)
 		{
-			fatalError = "[SOCKET] \"listen\" failed: " + std::to_string(WSAGetLastError());
-			break;
+			const std::string fatalErr = "[SOCKET] \"listen\" failed: " + std::to_string(WSAGetLastError());
+			std::cout << "[FATAL!] " << fatalErr;
+			SessionLog() << "[FATAL!] " << fatalErr;
+
+			closesocket(ListenSocket);
+			WSACleanup();
+			return 5;
 		}
 
 		// Accept the client socket
@@ -229,44 +233,51 @@ int main(int argc, char* argv[])
 		// reject the connection if enough sockets from that IP are already connected
 		if (g_config.numConnectionsPerIP)
 		{
-			switch (WaitForSingleObject(Socket::s_socketListMutex, 5000))
+			try
 			{
-				case WAIT_OBJECT_0: // Acquired ownership of the mutex
-					break;
-				case WAIT_TIMEOUT:
-					fatalError = "main(): Timed out waiting for socket list mutex: " + std::to_string(GetLastError());
-					break;
-				case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-					fatalError = "main(): Got ownership of an abandoned socket list mutex: " + std::to_string(GetLastError());
-					break;
-				default:
-					fatalError = "main(): An error occured waiting for socket list mutex: " + std::to_string(GetLastError());
-					break;
-			}
-			if (!fatalError.empty())
-				break;
-			USHORT numConns = 0;
-			for (const Socket* socket : Socket::GetList())
-			{
-				if (socket->GetAddress().ip == clientAddress.ip)
+				switch (WaitForSingleObject(Socket::s_socketListMutex, SOCKET_LIST_MUTEX_TIMEOUT_MS))
 				{
-					if (++numConns >= g_config.numConnectionsPerIP)
+					case WAIT_OBJECT_0: // Acquired ownership of the mutex
+						break;
+					case WAIT_TIMEOUT:
+						throw MutexError("main(): Timed out waiting for socket list mutex: " + std::to_string(GetLastError()));
+						break;
+					case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
+						throw MutexError("main(): Got ownership of an abandoned socket list mutex: " + std::to_string(GetLastError()));
+						break;
+					default:
+						throw MutexError("main(): An error occured waiting for socket list mutex: " + std::to_string(GetLastError()));
 						break;
 				}
-			}
-			if (!ReleaseMutex(Socket::s_socketListMutex))
-			{
-				fatalError = "main(): Couldn't release socket list mutex: " + std::to_string(GetLastError());
-				break;
-			}
+				USHORT numConns = 0;
+				for (const Socket* socket : Socket::GetList())
+				{
+					if (socket->GetAddress().ip == clientAddress.ip)
+					{
+						if (++numConns >= g_config.numConnectionsPerIP)
+							break;
+					}
+				}
+				if (!ReleaseMutex(Socket::s_socketListMutex))
+					throw MutexError("main(): Couldn't release socket list mutex: " + std::to_string(GetLastError()));
 
-			if (numConns >= g_config.numConnectionsPerIP)
-			{
-				SessionLog() << "[SOCKET] Rejected connection from client " << clientAddress
-					<< ": The number of existing connections from that IP exceeds the set limit!" << std::endl;
+				if (numConns >= g_config.numConnectionsPerIP)
+				{
+					SessionLog() << "[SOCKET] Rejected connection from client " << clientAddress
+						<< ": The number of existing connections from that IP exceeds the set limit!" << std::endl;
 
-				closesocket(ClientSocket);
-				continue;
+					closesocket(ClientSocket);
+					continue;
+				}
+			}
+			catch (const MutexError& fatalErr)
+			{
+				std::cout << "[FATAL!] " << fatalErr.what();
+				SessionLog() << "[FATAL!] " << fatalErr.what();
+
+				closesocket(ListenSocket);
+				WSACleanup();
+				return 7;
 			}
 		}
 
@@ -274,7 +285,7 @@ int main(int argc, char* argv[])
 		SessionLog() << "[SOCKET] Accepted connection from " << clientAddress << '.' << std::endl;
 
 		// Set recv/send timeout for client socket
-		const DWORD timeout = SOCKET_TIMEOUT_MS;
+		DWORD timeout = SOCKET_RECV_TIMEOUT;
 		if (setsockopt(ClientSocket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout)) != 0)
 		{
 			SessionLog() << "[SOCKET] \"setsockopt\" for recv() timeout failed: " << WSAGetLastError() << std::endl;
@@ -282,6 +293,7 @@ int main(int argc, char* argv[])
 			closesocket(ClientSocket);
 			continue;
 		}
+		timeout = SOCKET_SEND_TIMEOUT;
 		if (setsockopt(ClientSocket, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout)) != 0)
 		{
 			SessionLog() << "[SOCKET] \"setsockopt\" for send() timeout failed: " << WSAGetLastError() << std::endl;
@@ -301,15 +313,10 @@ int main(int argc, char* argv[])
 			continue;
 		}
 	}
-	if (!fatalError.empty())
-	{
-		std::cout << fatalError;
-		SessionLog() << fatalError;
-	}
 
 	// Clean up
 	closesocket(ListenSocket);
 	WSACleanup();
 
-	return fatalError.empty() ? 0 : 1;
+	return 0;
 }

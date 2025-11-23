@@ -7,7 +7,11 @@
 #include <sstream>
 #include <vector>
 
-#define SOCKET_TIMEOUT_MS 60000
+// Keep alive packets are sent every 10 (WinXP/ME) and 18 (Win7) seconds
+#define SOCKET_RECV_TIMEOUT 20000
+#define SOCKET_SEND_TIMEOUT 1000
+
+#define SOCKET_LIST_MUTEX_TIMEOUT_MS 5000
 
 class PlayerSocket;
 

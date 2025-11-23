@@ -121,7 +121,7 @@ PlayerSocket::ProcessMessages()
 				}
 				case STATE_STARTING_GAME:
 				{
-					switch (WaitForSingleObject(m_acceptsGameMessagesEvent, SOCKET_TIMEOUT_MS + 10000))
+					switch (WaitForSingleObject(m_acceptsGameMessagesEvent, MATCH_MUTEX_TIMEOUT_MS))
 					{
 						case WAIT_OBJECT_0:
 							break;
@@ -268,7 +268,7 @@ PlayerSocket::AwaitGenericMessageHeader()
 	if (!ValidateInternalMessageNoTotalLength<MessageConnectionGeneric>(m_incomingGenericMsg.base))
 		throw std::runtime_error("MsgBaseGeneric: Message is invalid!");
 
-	switch (WaitForSingleObject(m_genericMessageMutex, SOCKET_TIMEOUT_MS + 10000))
+	switch (WaitForSingleObject(m_genericMessageMutex, MATCH_MUTEX_TIMEOUT_MS))
 	{
 		case WAIT_OBJECT_0: // Acquired ownership of the mutex
 			break;

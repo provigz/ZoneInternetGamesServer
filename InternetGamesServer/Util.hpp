@@ -110,6 +110,20 @@ std::vector<int> GenerateUniqueRandomNums(int start, int end);
 /** Printing */
 std::ostream& operator<<(std::ostream& os, REFGUID guid);
 
+/* Exception handling */
+class MutexError final : public std::exception
+{
+public:
+	MutexError(const std::string& err) :
+		m_err(err)
+	{}
+
+	const char* what() const override { return m_err.c_str(); }
+
+private:
+	const std::string m_err;
+};
+
 /** Other utility classes */
 template<typename T, size_t Size>
 struct Array final

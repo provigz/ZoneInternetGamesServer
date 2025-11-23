@@ -15,6 +15,9 @@
 
 #define MATCH_MAX_PLAYERS 4
 
+// General timeout time for mutexes related to matches
+#define MATCH_MUTEX_TIMEOUT_MS 5000
+
 template<typename P>
 class Match
 {

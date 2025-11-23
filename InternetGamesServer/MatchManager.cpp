@@ -25,7 +25,16 @@ MatchManager::UpdateHandler(void*)
 {
 	while (true)
 	{
-		s_instance.Update();
+		try
+		{
+			s_instance.Update();
+		}
+		catch (const std::exception& fatalErr)
+		{
+			std::cout << "[FATAL!] " << fatalErr.what();
+			SessionLog() << "[FATAL!] " << fatalErr.what();
+			throw;
+		}
 		Sleep(1000); // Update once each second
 	}
 
@@ -40,7 +49,7 @@ MatchManager::MatchManager() :
 	m_matches_winxp()
 {
 	if (!m_mutex)
-		throw std::runtime_error("MatchManager: Couldn't create mutex: " + std::to_string(GetLastError()));
+		throw MutexError("MatchManager: Couldn't create mutex: " + std::to_string(GetLastError()));
 }
 
 MatchManager::~MatchManager()
@@ -52,16 +61,16 @@ MatchManager::~MatchManager()
 std::pair<const std::vector<std::unique_ptr<Win7::Match>>&, const std::vector<std::unique_ptr<WinXP::Match>>&>
 MatchManager::AcquireMatches()
 {
-	switch (WaitForSingleObject(m_mutex, SOCKET_TIMEOUT_MS + 10000))
+	switch (WaitForSingleObject(m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 	{
 		case WAIT_OBJECT_0: // Acquired ownership of the mutex
 			return { m_matches_win7, m_matches_winxp };
 		case WAIT_TIMEOUT:
-			throw std::runtime_error("MatchManager::AcquireMatchesWin7(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::AcquireMatchesWin7(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
 		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-			throw std::runtime_error("MatchManager::AcquireMatchesWin7(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::AcquireMatchesWin7(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
 		default:
-			throw std::runtime_error("MatchManager::AcquireMatchesWin7(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::AcquireMatchesWin7(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
 	}
 }
 
@@ -69,23 +78,23 @@ void
 MatchManager::FreeAcquiredMatches()
 {
 	if (!ReleaseMutex(m_mutex))
-		throw std::runtime_error("MatchManager::FreeAcquiredMatches(): Couldn't release mutex: " + std::to_string(GetLastError()));
+		throw MutexError("MatchManager::FreeAcquiredMatches(): Couldn't release mutex: " + std::to_string(GetLastError()));
 }
 
 
 void
 MatchManager::Update()
 {
-	switch (WaitForSingleObject(m_mutex, SOCKET_TIMEOUT_MS + 10000))
+	switch (WaitForSingleObject(m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 	{
 		case WAIT_OBJECT_0: // Acquired ownership of the mutex
 			break;
 		case WAIT_TIMEOUT:
-			throw std::runtime_error("MatchManager::Update(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::Update(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
 		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-			throw std::runtime_error("MatchManager::Update(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::Update(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
 		default:
-			throw std::runtime_error("MatchManager::Update(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::Update(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
 	}
 
 	for (auto it = m_matches_win7.begin(); it != m_matches_win7.end();)
@@ -101,16 +110,16 @@ MatchManager::Update()
 			SessionLog() << "[MATCH MANAGER] Closing ended Windows 7 " << Win7::Match::GameToNameString(match->GetGame())
 				<< " match " << match->GetGUID() << "!" << std::endl;
 
-			switch (WaitForSingleObject(match->m_mutex, SOCKET_TIMEOUT_MS + 10000))
+			switch (WaitForSingleObject(match->m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 			{
 				case WAIT_OBJECT_0: // Acquired ownership of the match mutex
 					break;
 				case WAIT_TIMEOUT:
-					throw std::runtime_error("MatchManager::Update(): Timed out waiting for Win7::Match mutex: " + std::to_string(GetLastError()));
+					throw MutexError("MatchManager::Update(): Timed out waiting for Win7::Match mutex: " + std::to_string(GetLastError()));
 				case WAIT_ABANDONED: // Acquired ownership of an abandoned match mutex
-					throw std::runtime_error("MatchManager::Update(): Got ownership of an abandoned Win7::Match mutex: " + std::to_string(GetLastError()));
+					throw MutexError("MatchManager::Update(): Got ownership of an abandoned Win7::Match mutex: " + std::to_string(GetLastError()));
 				default:
-					throw std::runtime_error("MatchManager::Update(): An error occured waiting for Win7::Match mutex: " + std::to_string(GetLastError()));
+					throw MutexError("MatchManager::Update(): An error occured waiting for Win7::Match mutex: " + std::to_string(GetLastError()));
 			}
 			it = m_matches_win7.erase(it);
 			continue;
@@ -130,16 +139,16 @@ MatchManager::Update()
 			SessionLog() << "[MATCH MANAGER] Closing ended Windows XP " << WinXP::Match::GameToNameString(match->GetGame())
 				<< " match " << match->GetGUID() << "!" << std::endl;
 
-			switch (WaitForSingleObject(match->m_mutex, SOCKET_TIMEOUT_MS + 10000))
+			switch (WaitForSingleObject(match->m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 			{
 				case WAIT_OBJECT_0: // Acquired ownership of the match mutex
 					break;
 				case WAIT_TIMEOUT:
-					throw std::runtime_error("MatchManager::DestroyMatch(): Timed out waiting for WinXP::Match mutex: " + std::to_string(GetLastError()));
+					throw MutexError("MatchManager::DestroyMatch(): Timed out waiting for WinXP::Match mutex: " + std::to_string(GetLastError()));
 				case WAIT_ABANDONED: // Acquired ownership of an abandoned match mutex
-					throw std::runtime_error("MatchManager::Update(): Got ownership of an abandoned WinXP::Match mutex: " + std::to_string(GetLastError()));
+					throw MutexError("MatchManager::Update(): Got ownership of an abandoned WinXP::Match mutex: " + std::to_string(GetLastError()));
 				default:
-					throw std::runtime_error("MatchManager::Update(): An error occured waiting for WinXP::Match mutex: " + std::to_string(GetLastError()));
+					throw MutexError("MatchManager::Update(): An error occured waiting for WinXP::Match mutex: " + std::to_string(GetLastError()));
 			}
 			it = m_matches_winxp.erase(it);
 			continue;
@@ -148,22 +157,22 @@ MatchManager::Update()
 	}
 
 	if (!ReleaseMutex(m_mutex))
-		throw std::runtime_error("MatchManager::Update(): Couldn't release mutex: " + std::to_string(GetLastError()));
+		throw MutexError("MatchManager::Update(): Couldn't release mutex: " + std::to_string(GetLastError()));
 }
 
 GUID
 MatchManager::DestroyMatch(unsigned int index)
 {
-	switch (WaitForSingleObject(m_mutex, SOCKET_TIMEOUT_MS + 10000))
+	switch (WaitForSingleObject(m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 	{
 		case WAIT_OBJECT_0: // Acquired ownership of the mutex
 			break;
 		case WAIT_TIMEOUT:
-			throw std::runtime_error("MatchManager::DestroyMatch(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::DestroyMatch(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
 		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-			throw std::runtime_error("MatchManager::DestroyMatch(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::DestroyMatch(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
 		default:
-			throw std::runtime_error("MatchManager::DestroyMatch(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::DestroyMatch(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
 	}
 
 	GUID matchGUID;
@@ -182,23 +191,23 @@ MatchManager::DestroyMatch(unsigned int index)
 			SessionLog() << "[MATCH MANAGER] Closing Windows XP " << WinXP::Match::GameToNameString(match->GetGame())
 				<< " match " << matchGUID << " per request!" << std::endl;
 
-			switch (WaitForSingleObject(match->m_mutex, SOCKET_TIMEOUT_MS + 10000))
+			switch (WaitForSingleObject(match->m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 			{
 				case WAIT_OBJECT_0: // Acquired ownership of the match mutex
 					break;
 				case WAIT_TIMEOUT:
-					throw std::runtime_error("MatchManager::DestroyMatch(): Timed out waiting for WinXP::Match mutex: " + std::to_string(GetLastError()));
+					throw MutexError("MatchManager::DestroyMatch(): Timed out waiting for WinXP::Match mutex: " + std::to_string(GetLastError()));
 				case WAIT_ABANDONED: // Acquired ownership of an abandoned match mutex
-					throw std::runtime_error("MatchManager::DestroyMatch(): Got ownership of an abandoned WinXP::Match mutex: " + std::to_string(GetLastError()));
+					throw MutexError("MatchManager::DestroyMatch(): Got ownership of an abandoned WinXP::Match mutex: " + std::to_string(GetLastError()));
 				default:
-					throw std::runtime_error("MatchManager::DestroyMatch(): An error occured waiting for WinXP::Match mutex: " + std::to_string(GetLastError()));
+					throw MutexError("MatchManager::DestroyMatch(): An error occured waiting for WinXP::Match mutex: " + std::to_string(GetLastError()));
 			}
 			m_matches_winxp.erase(itXP);
 		}
 		else
 		{
 			if (!ReleaseMutex(m_mutex))
-				throw std::runtime_error("MatchManager::DestroyMatch(): Couldn't release mutex: " + std::to_string(GetLastError()));
+				throw MutexError("MatchManager::DestroyMatch(): Couldn't release mutex: " + std::to_string(GetLastError()));
 			throw std::runtime_error("No match with index " + std::to_string(index) + '!');
 		}
 	}
@@ -210,22 +219,22 @@ MatchManager::DestroyMatch(unsigned int index)
 		SessionLog() << "[MATCH MANAGER] Closing Windows 7 " << Win7::Match::GameToNameString(match->GetGame())
 			<< " match " << matchGUID << " per request!" << std::endl;
 
-		switch (WaitForSingleObject(match->m_mutex, SOCKET_TIMEOUT_MS + 10000))
+		switch (WaitForSingleObject(match->m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 		{
 			case WAIT_OBJECT_0: // Acquired ownership of the match mutex
 				break;
 			case WAIT_TIMEOUT:
-				throw std::runtime_error("MatchManager::DestroyMatch(): Timed out waiting for Win7::Match mutex: " + std::to_string(GetLastError()));
+				throw MutexError("MatchManager::DestroyMatch(): Timed out waiting for Win7::Match mutex: " + std::to_string(GetLastError()));
 			case WAIT_ABANDONED: // Acquired ownership of an abandoned match mutex
-				throw std::runtime_error("MatchManager::DestroyMatch(): Got ownership of an abandoned Win7::Match mutex: " + std::to_string(GetLastError()));
+				throw MutexError("MatchManager::DestroyMatch(): Got ownership of an abandoned Win7::Match mutex: " + std::to_string(GetLastError()));
 			default:
-				throw std::runtime_error("MatchManager::DestroyMatch(): An error occured waiting for Win7::Match mutex: " + std::to_string(GetLastError()));
+				throw MutexError("MatchManager::DestroyMatch(): An error occured waiting for Win7::Match mutex: " + std::to_string(GetLastError()));
 		}
 		m_matches_win7.erase(it7);
 	}
 
 	if (!ReleaseMutex(m_mutex))
-		throw std::runtime_error("MatchManager::DestroyMatch(): Couldn't release mutex: " + std::to_string(GetLastError()));
+		throw MutexError("MatchManager::DestroyMatch(): Couldn't release mutex: " + std::to_string(GetLastError()));
 	return matchGUID;
 }
 
@@ -302,16 +311,16 @@ MatchManager::FindLobby(WinXP::PlayerSocket& player)
 Win7::Match*
 MatchManager::CreateLobby(Win7::PlayerSocket& player)
 {
-	switch (WaitForSingleObject(m_mutex, SOCKET_TIMEOUT_MS + 10000))
+	switch (WaitForSingleObject(m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 	{
 		case WAIT_OBJECT_0: // Acquired ownership of the mutex
 			break;
 		case WAIT_TIMEOUT:
-			throw std::runtime_error("MatchManager::CreateLobby(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::CreateLobby(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
 		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-			throw std::runtime_error("MatchManager::CreateLobby(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::CreateLobby(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
 		default:
-			throw std::runtime_error("MatchManager::CreateLobby(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::CreateLobby(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
 	}
 
 	switch (player.GetGame())
@@ -333,23 +342,23 @@ MatchManager::CreateLobby(Win7::PlayerSocket& player)
 	}
 
 	if (!ReleaseMutex(m_mutex))
-		throw std::runtime_error("MatchManager::CreateLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
+		throw MutexError("MatchManager::CreateLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
 	return m_matches_win7.back().get();
 }
 
 WinXP::Match*
 MatchManager::CreateLobby(WinXP::PlayerSocket& player)
 {
-	switch (WaitForSingleObject(m_mutex, SOCKET_TIMEOUT_MS + 10000))
+	switch (WaitForSingleObject(m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 	{
 		case WAIT_OBJECT_0: // Acquired ownership of the mutex
 			break;
 		case WAIT_TIMEOUT:
-			throw std::runtime_error("MatchManager::CreateLobby(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::CreateLobby(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
 		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-			throw std::runtime_error("MatchManager::CreateLobby(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::CreateLobby(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
 		default:
-			throw std::runtime_error("MatchManager::CreateLobby(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
+			throw MutexError("MatchManager::CreateLobby(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
 	}
 
 	switch (player.GetGame())
@@ -379,6 +388,6 @@ MatchManager::CreateLobby(WinXP::PlayerSocket& player)
 	}
 
 	if (!ReleaseMutex(m_mutex))
-		throw std::runtime_error("MatchManager::CreateLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
+		throw MutexError("MatchManager::CreateLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
 	return m_matches_winxp.back().get();
 }
