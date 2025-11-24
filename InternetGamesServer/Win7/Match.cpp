@@ -171,7 +171,7 @@ Match::DisconnectedPlayer(PlayerSocket& player)
 	// Based on the game, either replace with computer player, or end the game directly by disconnecting everyone.
 	else if (m_state == STATE_PLAYING)
 	{
-		if ((g_config.allowSinglePlayer || m_players.size() > 1))
+		if ((g_config.allowSinglePlayer || m_players.size() > 1) && SupportsComputerPlayers())
 		{
 			const std::string replaceWithAIXML =
 				StateSTag::ConstructMethodMessage("GameManagement", "ReplaceWithAI",
