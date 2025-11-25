@@ -175,7 +175,7 @@ PlayerSocket::ProcessMessages()
 		// Time out the client in states not involving participation in a match
 		if (m_state != STATE_WAITINGFOROPPONENTS &&
 			m_state != STATE_PLAYING &&
-			m_state.GetSecondsSinceLastChange() >= 60)
+			m_state.GetTimePassedMS() >= 60000)
 		{
 			throw std::runtime_error("WinXP::PlayerSocket::ProcessMessages(): Timeout: Client has not switched from state \""
 				+ StateToString(m_state) + "\" for 60 seconds or more!");

@@ -261,9 +261,9 @@ Match::Update()
 			if (m_endTime == 0)
 			{
 				SessionLog() << "[MATCH] " << m_guid << ": Game over, match will automatically close in 60 seconds!" << std::endl;
-				m_endTime = std::time(nullptr);
+				m_endTime = GetTickCount();
 			}
-			else if (std::time(nullptr) - m_endTime >= 60) // A minute has passed since the match ended
+			else if (GetTickCount() - m_endTime >= 60000) // A minute has passed since the match ended
 			{
 				SessionLog() << "[MATCH] " << m_guid << ": Match ended a minute ago, closing!" << std::endl;
 				m_state = STATE_ENDED;

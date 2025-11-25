@@ -101,7 +101,7 @@ private:
 	// Mutex to prevent simultaneous match processes, like adding/removing players and processing events and removal of the match
 	HANDLE m_mutex;
 
-	std::time_t m_endTime;
+	DWORD m_endTime;
 
 private:
 	Match(const Match&) = delete;

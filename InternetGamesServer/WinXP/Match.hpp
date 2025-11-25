@@ -114,7 +114,7 @@ private:
 
 	std::array<uint32, MATCH_MAX_PLAYERS> m_playerComputerIDs; // IDs of computer players by seat.
 
-	std::time_t m_endTime;
+	DWORD m_endTime;
 
 private:
 	Match(const Match&) = delete;

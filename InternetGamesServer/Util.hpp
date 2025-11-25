@@ -212,18 +212,18 @@ class ChangeTimeTracker final
 public:
 	ChangeTimeTracker() :
 		val(),
-		timeLastChange(std::time(nullptr))
+		timeLastChange(GetTickCount())
 	{}
 	ChangeTimeTracker(T defaultVal) :
 		val(std::move(defaultVal)),
-		timeLastChange(std::time(nullptr))
+		timeLastChange(GetTickCount())
 	{}
 
 	inline const T& Get() const { return val; }
 	inline operator const T&() const { return val; }
 
-	inline std::time_t GetTimeLastChange() const { return timeLastChange; }
-	inline std::time_t GetSecondsSinceLastChange() const { return std::time(nullptr) - timeLastChange; }
+	inline DWORD GetTimeLastChange() const { return timeLastChange; }
+	inline DWORD GetTimePassedMS() const { return GetTickCount() - timeLastChange; }
 
 	void operator=(const T& otherVal)
 	{
@@ -231,12 +231,12 @@ public:
 			return;
 
 		val = otherVal;
-		timeLastChange = std::time(nullptr);
+		timeLastChange = GetTickCount();
 	}
 
 private:
 	T val;
-	std::time_t timeLastChange;
+	DWORD timeLastChange;
 };
 
 /** Struct padding */
