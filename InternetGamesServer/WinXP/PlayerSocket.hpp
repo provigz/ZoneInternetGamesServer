@@ -12,14 +12,6 @@
 
 namespace WinXP {
 
-#define XPPlayerSocketMatchGuard(funcName) \
-	if (!m_match) \
-		throw std::runtime_error(std::string("WinXP::PlayerSocket::") + funcName + "(): Attempted to access destroyed match!"); \
-	if (m_match->GetState() == Match::STATE_ENDED) \
-		throw std::runtime_error(std::string("WinXP::PlayerSocket::") + funcName + "(): Attempted to access ended match!"); \
-	if (m_state != STATE_PLAYING) \
-		throw std::runtime_error(std::string("WinXP::PlayerSocket::") + funcName + "(): Attempted to access match while not in PLAYING state!"); \
-
 class PlayerSocket final : public ::PlayerSocket
 {
 public:
@@ -28,7 +20,6 @@ public:
 		STATE_UNCONFIGURED,
 		STATE_PROXY_DISCONNECTED,
 		STATE_WAITINGFOROPPONENTS,
-		STATE_STARTING_GAME,
 		STATE_PLAYING,
 		STATE_DISCONNECTING
 	};
@@ -42,7 +33,7 @@ public:
 	};
 
 public:
-	PlayerSocket(Socket& socket, const MsgConnectionHi& hiMessage);
+	PlayerSocket(Socket& socket, std::ostream& logStream, const MsgConnectionHi& hiMessage);
 	~PlayerSocket() override;
 
 	void ProcessMessages() override;
@@ -50,54 +41,36 @@ public:
 	/** Event handling */
 	void OnGameStart(const std::vector<PlayerSocket*>& matchPlayers);
 
-	inline void OnMatchAwaitEmptyGameMessage(uint32 type)
+	inline void OnMatchReadEmptyGameMessage(uint32 type)
 	{
-		AwaitIncomingEmptyGameMessage(type);
+		ReadIncomingEmptyGameMessage(type);
 	}
 	template<typename T, uint32 Type>
-	inline T OnMatchAwaitGameMessage()
+	inline T OnMatchReadGameMessage()
 	{
-		return AwaitIncomingGameMessage<T, Type>();
+		return ReadIncomingGameMessage<T, Type>();
 	}
 	template<typename T, uint32 Type, typename M, uint16 MessageLen> // Trailing data array after T
-	inline std::pair<T, Array<M, MessageLen>> OnMatchAwaitGameMessage()
+	inline std::pair<T, Array<M, MessageLen>> OnMatchReadGameMessage()
 	{
-		return AwaitIncomingGameMessage<T, Type, M, MessageLen>();
+		return ReadIncomingGameMessage<T, Type, M, MessageLen>();
 	}
 	template<uint32 Type, typename T>
-	inline void OnMatchGenericMessage(const T& msgApp, int len = sizeof(T))
+	inline void OnMatchGenericMessage(const T& msgApp, int len = sizeof(T)) noexcept
 	{
 		SendGenericMessage<Type>(msgApp, len);
 	}
 	template<uint32 Type, typename T>
-	void OnMatchGameMessage(const T& msgGame, int len = sizeof(T))
+	void OnMatchGameMessage(const T& msgGame, int len = sizeof(T)) noexcept
 	{
-		switch (WaitForSingleObject(m_acceptsGameMessagesEvent, MATCH_MUTEX_TIMEOUT_MS))
-		{
-			case WAIT_OBJECT_0:
-				SendGameMessage<Type>(msgGame, len);
-				break;
-			case WAIT_TIMEOUT:
-				throw std::runtime_error("WinXP::PlayerSocket::OnMatchGameMessage(): Timed out waiting for \"accepts game messages\" event!");
-			default:
-				throw std::runtime_error("WinXP::PlayerSocket::OnMatchGameMessage(): An error occured waiting for \"accepts game messages\" event: " + std::to_string(GetLastError()));
-		}
+		SendGameMessage<Type>(msgGame, len);
 	}
 	template<uint32 Type, typename T, typename M, uint16 MessageLen> // Trailing data array after T
-	void OnMatchGameMessage(T msgGame, const Array<M, MessageLen>& msgGameSecond)
+	void OnMatchGameMessage(T msgGame, const Array<M, MessageLen>& msgGameSecond) noexcept
 	{
-		switch (WaitForSingleObject(m_acceptsGameMessagesEvent, MATCH_MUTEX_TIMEOUT_MS))
-		{
-			case WAIT_OBJECT_0:
-				SendGameMessage<Type>(msgGame, msgGameSecond);
-				break;
-			case WAIT_TIMEOUT:
-				throw std::runtime_error("WinXP::PlayerSocket::OnMatchGameMessage(): Timed out waiting for \"accepts game messages\" event!");
-			default:
-				throw std::runtime_error("WinXP::PlayerSocket::OnMatchGameMessage(): An error occured waiting for \"accepts game messages\" event: " + std::to_string(GetLastError()));
-		}
+		SendGameMessage<Type>(msgGame, msgGameSecond);
 	}
-	void OnMatchDisconnect();
+	void OnMatchDisconnect() noexcept;
 
 	inline ClientVersion GetClientVersion() const { return m_clientVersion; }
 	inline bool IsWinME() const { return m_clientVersion == ClientVersion::WINME; }
@@ -112,14 +85,51 @@ public:
 	MsgConnectionHello ConstructHelloMessage() const;
 
 private:
-	/* Awaiting utilities */
 	void AwaitGenericMessageHeader();
+
+	/* Reading messages (generic helpers) */
+	template<class T>
+	void ReadIncomingMessage(T& data, int len = sizeof(T))
+	{
+		assert(len <= sizeof(T));
+		if (len == 0)
+			return;
+
+		if (len > m_incomingGenericMsg.GetBufferLength())
+			throw std::runtime_error("Requested message is longer than buffer!");
+
+		std::memmove(&data, m_incomingGenericMsg.buffer.data(), len);
+		m_incomingGenericMsg.buffer.erase(0, len);
+
+		m_logStream << "[PROCESSED]: " << data << "\n\n" << std::endl;
+	}
+	template<class T>
+	void ReadIncomingMessage(T& data, void(T::*converter)(), char* dataRaw = nullptr, int len = sizeof(T))
+	{
+		assert(len <= sizeof(T));
+		if (len == 0)
+			return;
+
+		if (len > m_incomingGenericMsg.GetBufferLength())
+			throw std::runtime_error("Requested message is longer than buffer!");
+
+		std::memmove(&data, m_incomingGenericMsg.buffer.data(), len);
+		m_incomingGenericMsg.buffer.erase(0, len);
+
+		if (dataRaw)
+			std::memcpy(dataRaw, &data, len);
+		(data.*converter)();
+
+		m_logStream << "[PROCESSED]: " << data << "\n\n" << std::endl;
+	}
+
+	/* Reading messages (generic) */
 	template<typename T, uint32 Type>
-	T AwaitIncomingGenericMessage(bool forceProxySig = false)
+	T ReadIncomingGenericMessage(bool forceProxySig = false)
 	{
 		static_assert(sizeof(T) % sizeof(uint32) == 0, "Size of T must be divisible by 4! Add STRUCT_PADDING at the end, if required.");
 
-		assert(m_incomingGenericMsg.valid && !m_incomingGameMsg.valid);
+		assert(!m_incomingGenericMsg.buffer.empty() && !m_incomingGameMsg.valid);
 
 		const MsgBaseGeneric& msgBaseGeneric = m_incomingGenericMsg.base;
 		const MsgBaseApplication& msgBaseApp = m_incomingGenericMsg.info;
@@ -135,17 +145,9 @@ private:
 			throw std::runtime_error("MsgBaseApplication: Data is of incorrect size! Expected: " + std::to_string(AdjustedSize<T>));
 
 		T msgApp;
-		try
-		{
-			m_socket.ReceiveData(msgApp, DecryptMessage, m_securityKey);
-		}
-		catch (...)
-		{
-			ReleaseMutex(m_genericMessageMutex);
-			throw;
-		}
+		ReadIncomingMessage(msgApp);
 
-		AwaitIncomingGenericFooter();
+		ReadIncomingGenericFooter();
 
 		// Validate checksum
 		const uint32 checksum = GenerateChecksum({
@@ -157,20 +159,19 @@ private:
 
 		return msgApp;
 	}
-	void AwaitIncomingGameMessageHeader();
-	void AwaitIncomingEmptyGameMessage(uint32 type);
+	void ReadIncomingGameMessageHeader();
+	void ReadIncomingEmptyGameMessage(uint32 type);
 	template<typename T, uint32 Type>
-	T AwaitIncomingGameMessage()
+	T ReadIncomingGameMessage()
 	{
 		static_assert(sizeof(T) % sizeof(uint32) == 0, "Size of T must be divisible by 4! Add STRUCT_PADDING at the end, if required.");
 
-		assert(m_incomingGenericMsg.valid && m_incomingGameMsg.valid);
+		assert(!m_incomingGenericMsg.buffer.empty() && m_incomingGameMsg.valid);
 
 		const MsgBaseGeneric& msgBaseGeneric = m_incomingGenericMsg.base;
 		const MsgBaseApplication& msgBaseApp = m_incomingGenericMsg.info;
 		const MsgGameMessage& msgGameMessage = m_incomingGameMsg.info;
 
-		XPPlayerSocketMatchGuard("AwaitIncomingGameMessage")
 		if (msgGameMessage.gameID != m_match->GetGameID())
 			throw std::runtime_error("MsgGameMessage: Incorrect game ID!");
 		if (msgGameMessage.type != Type)
@@ -182,17 +183,9 @@ private:
 
 		T msgGame;
 		char msgGameRaw[sizeof(T)];
-		try
-		{
-			m_socket.ReceiveData(msgGame, &T::ConvertToHostEndian, DecryptMessage, m_securityKey, msgGameRaw);
-		}
-		catch (...)
-		{
-			ReleaseMutex(m_genericMessageMutex);
-			throw;
-		}
+		ReadIncomingMessage(msgGame, &T::ConvertToHostEndian, msgGameRaw);
 
-		AwaitIncomingGenericFooter();
+		ReadIncomingGenericFooter();
 		m_incomingGameMsg.valid = false;
 
 		// Validate checksum
@@ -208,17 +201,16 @@ private:
 	}
 	template<typename T, uint32 Type, typename M, uint16 MessageLen> // Trailing data array after T
 	typename std::enable_if_t<(sizeof(M) % sizeof(uint32) == 0), std::pair<T, Array<M, MessageLen>>>
-	AwaitIncomingGameMessage()
+	ReadIncomingGameMessage()
 	{
 		static_assert(sizeof(T) % sizeof(uint32) == 0, "Size of T must be divisible by 4! Add STRUCT_PADDING at the end, if required.");
 
-		assert(m_incomingGenericMsg.valid && m_incomingGameMsg.valid);
+		assert(!m_incomingGenericMsg.buffer.empty() && m_incomingGameMsg.valid);
 
 		const MsgBaseGeneric& msgBaseGeneric = m_incomingGenericMsg.base;
 		const MsgBaseApplication& msgBaseApp = m_incomingGenericMsg.info;
 		const MsgGameMessage& msgGameMessage = m_incomingGameMsg.info;
 
-		XPPlayerSocketMatchGuard("AwaitIncomingGameMessage")
 		if (msgGameMessage.gameID != m_match->GetGameID())
 			throw std::runtime_error("MsgGameMessage: Incorrect game ID!");
 		if (msgGameMessage.type != Type)
@@ -228,15 +220,7 @@ private:
 
 		T msgGame;
 		char msgGameRaw[sizeof(T)];
-		try
-		{
-			m_socket.ReceiveData(msgGame, &T::ConvertToHostEndian, DecryptMessage, m_securityKey, msgGameRaw);
-		}
-		catch (...)
-		{
-			ReleaseMutex(m_genericMessageMutex);
-			throw;
-		}
+		ReadIncomingMessage(msgGame, &T::ConvertToHostEndian, msgGameRaw);
 
 		if (msgGameMessage.length != AdjustedSize<T> + msgGame.messageLength * sizeof(M))
 			throw std::runtime_error("MsgGameMessage: Data is of incorrect size! Expected: " + std::to_string(AdjustedSize<T> + msgGame.messageLength * sizeof(M)));
@@ -247,17 +231,9 @@ private:
 
 		Array<M, MessageLen> msgGameSecond;
 		msgGameSecond.SetLength(static_cast<int>(msgGame.messageLength));
-		try
-		{
-			m_socket.ReceiveData(msgGameSecond, DecryptMessage, m_securityKey, rawMsgLength);
-		}
-		catch (...)
-		{
-			ReleaseMutex(m_genericMessageMutex);
-			throw;
-		}
+		ReadIncomingMessage(msgGameSecond, rawMsgLength);
 
-		AwaitIncomingGenericFooter();
+		ReadIncomingGenericFooter();
 		m_incomingGameMsg.valid = false;
 
 		// Validate checksum
@@ -277,17 +253,16 @@ private:
 	}
 	template<typename T, uint32 Type, typename M, uint16 MessageLen> // Trailing data array after T
 	typename std::enable_if_t<(sizeof(M) % sizeof(uint32) != 0), std::pair<T, Array<M, MessageLen>>>
-	AwaitIncomingGameMessage()
+	ReadIncomingGameMessage()
 	{
 		static_assert(sizeof(T) % sizeof(uint32) == 0, "Size of T must be divisible by 4! Add STRUCT_PADDING at the end, if required.");
 
-		assert(m_incomingGenericMsg.valid && m_incomingGameMsg.valid);
+		assert(!m_incomingGenericMsg.buffer.empty() && m_incomingGameMsg.valid);
 
 		const MsgBaseGeneric& msgBaseGeneric = m_incomingGenericMsg.base;
 		const MsgBaseApplication& msgBaseApp = m_incomingGenericMsg.info;
 		const MsgGameMessage& msgGameMessage = m_incomingGameMsg.info;
 
-		XPPlayerSocketMatchGuard("AwaitIncomingGameMessage")
 		if (msgGameMessage.gameID != m_match->GetGameID())
 			throw std::runtime_error("MsgGameMessage: Incorrect game ID!");
 		if (msgGameMessage.type != Type)
@@ -297,15 +272,7 @@ private:
 
 		T msgGame;
 		char msgGameRaw[sizeof(T)];
-		try
-		{
-			m_socket.ReceiveData(msgGame, &T::ConvertToHostEndian, DecryptMessage, m_securityKey, msgGameRaw);
-		}
-		catch (...)
-		{
-			ReleaseMutex(m_genericMessageMutex);
-			throw;
-		}
+		ReadIncomingMessage(msgGame, &T::ConvertToHostEndian, msgGameRaw);
 
 		if (msgGameMessage.length != AdjustedSize<T> + msgGame.messageLength * sizeof(M))
 			throw std::runtime_error("MsgGameMessage: Data is of incorrect size! Expected: " + std::to_string(AdjustedSize<T> + msgGame.messageLength * sizeof(M)));
@@ -318,17 +285,9 @@ private:
 		// Must be in one buffer as to not split DWORD blocks for checksum generation.
 		Array<char, ROUND_DATA_LENGTH_UINT32(MessageLen * sizeof(M))> msgGameSecondFull;
 		msgGameSecondFull.SetLength(rawMsgLengthRounded);
-		try
-		{
-			m_socket.ReceiveData(msgGameSecondFull, DecryptMessage, m_securityKey, rawMsgLengthRounded);
-		}
-		catch (...)
-		{
-			ReleaseMutex(m_genericMessageMutex);
-			throw;
-		}
+		ReadIncomingMessage(msgGameSecondFull, rawMsgLengthRounded);
 
-		AwaitIncomingGenericFooter();
+		ReadIncomingGenericFooter();
 		m_incomingGameMsg.valid = false;
 
 		// Validate checksum
@@ -353,15 +312,39 @@ private:
 			std::move(msgGameSecond)
 		};
 	}
-	void AwaitIncomingGenericFooter();
+	void ReadIncomingGenericFooter();
 
-	/* Awaiting messages */
-	void AwaitProxyHiMessages();
-	void AwaitClientConfig();
+	/* Reading messages */
+	void ReadProxyHiMessages();
+	void ReadClientConfig();
 
-	/* Sending utilities */
+	/* Sending messages (generic helpers) */
+	template<class T>
+	int QueueMessageForSend(char* buf, const T& data, int len = sizeof(T))
+	{
+		assert(len <= sizeof(T));
+
+		std::memcpy(buf, &data, len);
+
+		m_logStream << "[QUEUED]: " << data << "\n(BYTES QUEUED=" << len << ")\n\n" << std::endl;
+		return len;
+	}
+	template<class T>
+	int QueueMessageForSend(char* buf, const T& data, void(T::*converter)(), int len = sizeof(T))
+	{
+		assert(len <= sizeof(T));
+
+		T dataConverted = data;
+		(dataConverted.*converter)();
+		std::memmove(buf, &dataConverted, len);
+
+		m_logStream << "[QUEUED]: " << data << "\n(BYTES QUEUED=" << len << ")\n\n" << std::endl;
+		return len;
+	}
+
+	/* Sending messages (generic) */
 	template<uint32 Type, typename T>
-	void SendGenericMessage(T msgApp, int len = AdjustedSize<T>, bool forceProxySig = false)
+	void SendGenericMessage(const T& msgApp, int len = AdjustedSize<T>, bool forceProxySig = false) noexcept
 	{
 		static_assert(sizeof(T) % sizeof(uint32) == 0, "Size of T must be divisible by 4! Add STRUCT_PADDING at the end, if required.");
 		assert(len % sizeof(uint32) == 0);
@@ -382,41 +365,21 @@ private:
 		MsgFooterGeneric msgFooterGeneric;
 		msgFooterGeneric.status = MsgFooterGeneric::STATUS_OK;
 
-		switch (WaitForSingleObject(m_genericMessageMutex, MATCH_MUTEX_TIMEOUT_MS))
-		{
-			case WAIT_OBJECT_0: // Acquired ownership of the mutex
-				break;
-			case WAIT_TIMEOUT:
-				throw MutexError("WinXP::PlayerSocket::SendGenericMessage(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
-			case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-				throw MutexError("WinXP::PlayerSocket::SendGenericMessage(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
-			default:
-				throw MutexError("WinXP::PlayerSocket::SendGenericMessage(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
-		}
-
-		try
-		{
-			m_socket.SendData(std::move(msgBaseGeneric), EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgBaseApp), EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgApp), EncryptMessage, m_securityKey, len);
-			m_socket.SendData(msgFooterGeneric);
-		}
-		catch (...)
-		{
-			ReleaseMutex(m_genericMessageMutex);
-			throw;
-		}
-
-		if (!ReleaseMutex(m_genericMessageMutex))
-			throw MutexError("WinXP::PlayerSocket::SendGenericMessage(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
+		char dataBuf[sizeof(MsgBaseGeneric) + sizeof(MsgBaseApplication) + sizeof(T) + sizeof(MsgFooterGeneric)];
+		int dataBufLen = 0;
+		dataBufLen += QueueMessageForSend(dataBuf, msgBaseGeneric);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgBaseApp);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgApp, len);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgFooterGeneric);
+		assert(msgBaseGeneric.totalLength == dataBufLen);
+		EncryptMessage(dataBuf, dataBufLen - sizeof(MsgFooterGeneric), m_securityKey); // MsgFooterGeneric is not encrypted
+		m_socket.SendData(dataBuf, dataBufLen);
 	}
 	template<uint32 Type, typename T>
-	void SendGameMessage(T msgGame, int len = AdjustedSize<T>)
+	void SendGameMessage(const T& msgGame, int len = AdjustedSize<T>) noexcept
 	{
 		static_assert(sizeof(T) % sizeof(uint32) == 0, "Size of T must be divisible by 4! Add STRUCT_PADDING at the end, if required.");
 		assert(len % sizeof(uint32) == 0);
-
-		XPPlayerSocketMatchGuard("SendGameMessage")
 
 		assert(m_proxyConnected);
 
@@ -446,42 +409,22 @@ private:
 		MsgFooterGeneric msgFooterGeneric;
 		msgFooterGeneric.status = MsgFooterGeneric::STATUS_OK;
 
-		switch (WaitForSingleObject(m_genericMessageMutex, MATCH_MUTEX_TIMEOUT_MS))
-		{
-			case WAIT_OBJECT_0: // Acquired ownership of the mutex
-				break;
-			case WAIT_TIMEOUT:
-				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
-			case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
-			default:
-				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
-		}
-
-		try
-		{
-			m_socket.SendData(std::move(msgBaseGeneric), EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgBaseApp), EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgGameMessage), EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgGame), &T::ConvertToNetworkEndian, EncryptMessage, m_securityKey, len);
-			m_socket.SendData(msgFooterGeneric);
-		}
-		catch (...)
-		{
-			ReleaseMutex(m_genericMessageMutex);
-			throw;
-		}
-
-		if (!ReleaseMutex(m_genericMessageMutex))
-			throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
+		char dataBuf[sizeof(MsgBaseGeneric) + sizeof(MsgBaseApplication) + sizeof(MsgGameMessage) + sizeof(T) + sizeof(MsgFooterGeneric)];
+		int dataBufLen = 0;
+		dataBufLen += QueueMessageForSend(dataBuf, msgBaseGeneric);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgBaseApp);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgGameMessage);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgGame, &T::ConvertToNetworkEndian, len);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgFooterGeneric);
+		assert(msgBaseGeneric.totalLength == dataBufLen);
+		EncryptMessage(dataBuf, dataBufLen - sizeof(MsgFooterGeneric), m_securityKey); // MsgFooterGeneric is not encrypted
+		m_socket.SendData(dataBuf, dataBufLen);
 	}
 	template<uint32 Type, typename T, typename M, uint16 MessageLen> // Trailing data array after T
 	typename std::enable_if_t<(sizeof(M) % sizeof(uint32) == 0), void>
-	SendGameMessage(T msgGame, Array<M, MessageLen> msgGameSecond)
+	SendGameMessage(const T& msgGame, Array<M, MessageLen> msgGameSecond) noexcept
 	{
 		static_assert(sizeof(T) % sizeof(uint32) == 0, "Size of T must be divisible by 4! Add STRUCT_PADDING at the end, if required.");
-
-		XPPlayerSocketMatchGuard("SendGameMessage")
 
 		assert(m_proxyConnected);
 
@@ -505,7 +448,7 @@ private:
 		msgGameNetworkEndian.ConvertToNetworkEndian();
 
 		MsgBaseGeneric msgBaseGeneric;
-		msgBaseGeneric.totalLength = sizeof(MsgBaseGeneric) + sizeof(MsgBaseApplication) + sizeof(MsgGameMessage) + sizeof(msgGame) + static_cast<uint32>(msgGameSecond.GetLength()) * sizeof(M) + sizeof(MsgFooterGeneric);
+		msgBaseGeneric.totalLength = sizeof(MsgBaseGeneric) + sizeof(MsgBaseApplication) + sizeof(MsgGameMessage) + sizeof(msgGame) + rawMsgLength + sizeof(MsgFooterGeneric);
 		msgBaseGeneric.sequenceID = m_sequenceID++;
 		msgBaseGeneric.checksum = GenerateChecksum({
 				{ &msgBaseApp, sizeof(msgBaseApp) },
@@ -517,43 +460,23 @@ private:
 		MsgFooterGeneric msgFooterGeneric;
 		msgFooterGeneric.status = MsgFooterGeneric::STATUS_OK;
 
-		switch (WaitForSingleObject(m_genericMessageMutex, MATCH_MUTEX_TIMEOUT_MS))
-		{
-			case WAIT_OBJECT_0: // Acquired ownership of the mutex
-				break;
-			case WAIT_TIMEOUT:
-				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
-			case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
-			default:
-				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
-		}
-
-		try
-		{
-			m_socket.SendData(std::move(msgBaseGeneric), EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgBaseApp), EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgGameMessage), EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgGame), &T::ConvertToNetworkEndian, EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgGameSecond), EncryptMessage, m_securityKey, rawMsgLength);
-			m_socket.SendData(msgFooterGeneric);
-		}
-		catch (...)
-		{
-			ReleaseMutex(m_genericMessageMutex);
-			throw;
-		}
-
-		if (!ReleaseMutex(m_genericMessageMutex))
-			throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
+		char dataBuf[sizeof(MsgBaseGeneric) + sizeof(MsgBaseApplication) + sizeof(MsgGameMessage) + sizeof(msgGame) + MessageLen * sizeof(M) + sizeof(MsgFooterGeneric)];
+		int dataBufLen = 0;
+		dataBufLen += QueueMessageForSend(dataBuf, msgBaseGeneric);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgBaseApp);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgGameMessage);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgGame, &T::ConvertToNetworkEndian);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgGameSecond, rawMsgLength);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgFooterGeneric);
+		assert(msgBaseGeneric.totalLength == dataBufLen);
+		EncryptMessage(dataBuf, dataBufLen - sizeof(MsgFooterGeneric), m_securityKey); // MsgFooterGeneric is not encrypted
+		m_socket.SendData(dataBuf, dataBufLen);
 	}
 	template<uint32 Type, typename T, typename M, uint16 MessageLen> // Trailing data array after T
 	typename std::enable_if_t<(sizeof(M) % sizeof(uint32) != 0), void>
-	SendGameMessage(T msgGame, const Array<M, MessageLen>& msgGameSecond)
+	SendGameMessage(const T& msgGame, const Array<M, MessageLen>& msgGameSecond) noexcept
 	{
 		static_assert(sizeof(T) % sizeof(uint32) == 0, "Size of T must be divisible by 4! Add STRUCT_PADDING at the end, if required.");
-
-		XPPlayerSocketMatchGuard("SendGameMessage")
 
 		assert(m_proxyConnected);
 
@@ -583,7 +506,7 @@ private:
 		msgGameNetworkEndian.ConvertToNetworkEndian();
 
 		MsgBaseGeneric msgBaseGeneric;
-		msgBaseGeneric.totalLength = sizeof(MsgBaseGeneric) + sizeof(MsgBaseApplication) + sizeof(MsgGameMessage) + sizeof(msgGame) + static_cast<uint32>(msgGameSecondFull.GetLength()) + sizeof(MsgFooterGeneric);
+		msgBaseGeneric.totalLength = sizeof(MsgBaseGeneric) + sizeof(MsgBaseApplication) + sizeof(MsgGameMessage) + sizeof(msgGame) + rawMsgLengthRounded + sizeof(MsgFooterGeneric);
 		msgBaseGeneric.sequenceID = m_sequenceID++;
 		msgBaseGeneric.checksum = GenerateChecksum({
 				{ &msgBaseApp, sizeof(msgBaseApp) },
@@ -595,35 +518,17 @@ private:
 		MsgFooterGeneric msgFooterGeneric;
 		msgFooterGeneric.status = MsgFooterGeneric::STATUS_OK;
 
-		switch (WaitForSingleObject(m_genericMessageMutex, MATCH_MUTEX_TIMEOUT_MS))
-		{
-			case WAIT_OBJECT_0: // Acquired ownership of the mutex
-				break;
-			case WAIT_TIMEOUT:
-				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
-			case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
-			default:
-				throw MutexError("WinXP::PlayerSocket::SendGameMessage(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
-		}
-
-		try
-		{
-			m_socket.SendData(std::move(msgBaseGeneric), EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgBaseApp), EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgGameMessage), EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgGame), &T::ConvertToNetworkEndian, EncryptMessage, m_securityKey);
-			m_socket.SendData(std::move(msgGameSecondFull), EncryptMessage, m_securityKey, rawMsgLengthRounded);
-			m_socket.SendData(msgFooterGeneric);
-		}
-		catch (...)
-		{
-			ReleaseMutex(m_genericMessageMutex);
-			throw;
-		}
-
-		if (!ReleaseMutex(m_genericMessageMutex))
-			throw MutexError("WinXP::PlayerSocket::SendGameMessage(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
+		char dataBuf[sizeof(MsgBaseGeneric) + sizeof(MsgBaseApplication) + sizeof(MsgGameMessage) + sizeof(msgGame) + ROUND_DATA_LENGTH_UINT32(MessageLen * sizeof(M)) + sizeof(MsgFooterGeneric)];
+		int dataBufLen = 0;
+		dataBufLen += QueueMessageForSend(dataBuf, msgBaseGeneric);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgBaseApp);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgGameMessage);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgGame, &T::ConvertToNetworkEndian);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgGameSecondFull, rawMsgLengthRounded);
+		dataBufLen += QueueMessageForSend(dataBuf + dataBufLen, msgFooterGeneric);
+		assert(msgBaseGeneric.totalLength == dataBufLen);
+		EncryptMessage(dataBuf, dataBufLen - sizeof(MsgFooterGeneric), m_securityKey); // MsgFooterGeneric is not encrypted
+		m_socket.SendData(dataBuf, dataBufLen);
 	}
 
 	/* Sending messages */
@@ -636,10 +541,11 @@ protected:
 private:
 	struct IncomingGenericMessage final
 	{
-		bool valid = false;
+		std::string buffer;
 		MsgBaseGeneric base;
 		MsgBaseApplication info;
 
+		inline int GetBufferLength() const { return static_cast<int>(buffer.length()); }
 		inline uint32 GetType() const { return info.messageType; }
 	};
 	struct IncomingGameMessage final
@@ -669,9 +575,7 @@ private:
 	uint32 m_sequenceID;
 	bool m_proxyConnected;
 
-	HANDLE m_genericMessageMutex; // Mutex to prevent simultaneous receiving/sending generic messages
-	HANDLE m_acceptsGameMessagesEvent; // Signaled when the client is ready to accept game messages. Only set in STATE_PLAYING
-
+	std::ostream& m_logStream;
 	IncomingGenericMessage m_incomingGenericMsg;
 	IncomingGameMessage m_incomingGameMsg;
 

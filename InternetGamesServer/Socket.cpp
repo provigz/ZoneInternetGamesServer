@@ -9,13 +9,10 @@
 
 #include "Config.hpp"
 #include "Resource.h"
-#include "Util.hpp"
 #include "Win7/PlayerSocket.hpp"
 #include "WinXP/PlayerSocket.hpp"
 #include "WinXP/Protocol/Init.hpp"
 #include "WinXP/Security.hpp"
-
-#define DEFAULT_BUFLEN 2048
 
 static const char* SOCKET_WIN7_HI_RESPONSE = "STADIUM/2.0\r\n";
 static const std::vector<BYTE> XP_AD_BANNER_DATA = {};
@@ -75,11 +72,13 @@ Socket::SocketHandler(void* socket_)
 		std::unique_ptr<PlayerSocket> player;
 		{
 			// Determine socket type, create PlayerSocket object and parse initial message
-			char receivedBuf[DEFAULT_BUFLEN];
-			const int receivedLen = socket.ReceiveData(receivedBuf, DEFAULT_BUFLEN);
+			char receivedBuf[2048];
+			const int receivedLen = socket.ReceiveData(receivedBuf, sizeof(receivedBuf));
 			if (!strncmp(receivedBuf, SOCKET_WIN7_HI_RESPONSE, receivedLen)) // WIN7
 			{
 				socket.m_type = WIN7;
+				socket.SetNonBlocking();
+
 				player = std::make_unique<Win7::PlayerSocket>(socket);
 
 				socket.SendData(SOCKET_WIN7_HI_RESPONSE, static_cast<int>(strlen(SOCKET_WIN7_HI_RESPONSE)));
@@ -87,6 +86,7 @@ Socket::SocketHandler(void* socket_)
 			else if (receivedLen == sizeof(WinXP::MsgConnectionHi)) // WINXP/WINME
 			{
 				socket.m_type = WINXP;
+				socket.SetNonBlocking();
 
 				WinXP::MsgConnectionHi hiMessage;
 				std::memcpy(&hiMessage, receivedBuf, receivedLen);
@@ -95,11 +95,14 @@ Socket::SocketHandler(void* socket_)
 				if (WinXP::ValidateInternalMessage<WinXP::MessageConnectionHi>(hiMessage) &&
 					hiMessage.protocolVersion == XPInternalProtocolVersion)
 				{
-					*socket.m_logStream << "[INITIAL MESSAGE]: " << hiMessage << '\n' << std::endl;
+					*socket.m_logStream << "[PROCESSED]: " << hiMessage << "\n\n" << std::endl;
 
-					auto xpPlayer = std::make_unique<WinXP::PlayerSocket>(socket, hiMessage);
+					auto xpPlayer = std::make_unique<WinXP::PlayerSocket>(socket, *socket.m_logStream, hiMessage);
 
-					socket.SendData(xpPlayer->ConstructHelloMessage(), WinXP::EncryptMessage, XPDefaultSecurityKey);
+					WinXP::MsgConnectionHello helloMessage = xpPlayer->ConstructHelloMessage();
+					WinXP::EncryptMessage(&helloMessage, sizeof(helloMessage), XPDefaultSecurityKey);
+					*socket.m_logStream << "[QUEUED]: " << helloMessage << "\n(BYTES QUEUED=" << sizeof(helloMessage) << ")\n\n" << std::endl;
+					socket.SendData(reinterpret_cast<const char*>(&helloMessage), sizeof(helloMessage));
 
 					player = std::move(xpPlayer);
 				}
@@ -180,10 +183,10 @@ Socket::SocketHandler(void* socket_)
 			<< ": " << err.what() << std::endl;
 		return 0;
 	}
-	catch (const ClientDisconnected&)
+	catch (const ClientDisconnected& err)
 	{
 		SessionLog() << "[SOCKET] Error communicating with socket " << socket.m_address
-			<< ": Client has been disconnected." << std::endl;
+			<< ": Client has been disconnected: " << err.what() << std::endl;
 		return 0;
 	}
 	catch (const MutexError& fatalErr)
@@ -260,6 +263,12 @@ Socket::Socket(SOCKET socket) :
 	m_connectionTime(std::time(nullptr)),
 	m_address(GetAddress(socket)),
 	m_logStream(),
+	m_nonBlocking(false),
+	m_socketEvent(),
+	m_sendEvent(),
+	m_sendBuffer(),
+	m_sendBufferMutex(),
+	m_lastSendBufferTime(0),
 	m_disconnected(false),
 	m_type(UNKNOWN),
 	m_playerSocket(nullptr)
@@ -289,6 +298,10 @@ Socket::~Socket()
 	assert(mutexResult && "Socket::~Socket(): Failed to release socket list mutex!");
 
 	// Clean up
+	CloseHandle(m_sendBufferMutex);
+	CloseHandle(m_sendEvent);
+	WSACloseEvent(m_socketEvent);
+
 	Disconnect();
 	closesocket(m_socket);
 }
@@ -341,17 +354,148 @@ Socket::Disconnect()
 }
 
 
+void
+Socket::SetNonBlocking()
+{
+	if (m_nonBlocking)
+		return;
+
+	m_sendEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+	m_sendBufferMutex = CreateMutex(NULL, FALSE, NULL);
+
+	m_socketEvent = WSACreateEvent();
+	WSAEventSelect(m_socket, m_socketEvent, FD_READ | FD_WRITE | FD_CLOSE);
+
+	m_nonBlocking = true;
+}
+
+/* A recv() wrapper which on non-blocking sockets also handles other socket events. */
+int
+Socket::Receive(char* buf, int len)
+{
+	if (!m_nonBlocking)
+	{
+		const int receivedLen = recv(m_socket, buf, len, 0);
+		if (receivedLen > 0)
+			return receivedLen;
+		if (receivedLen == 0)
+			throw ClientDisconnected(0);
+
+		throw std::runtime_error("\"recv\" failed: " + std::to_string(WSAGetLastError()));
+	}
+
+	const HANDLE events[2] = { m_socketEvent, m_sendEvent };
+	while (true)
+	{
+		const DWORD waitResult = WSAWaitForMultipleEvents(2, events, FALSE, SOCKET_RECV_TIMEOUT, FALSE);
+
+		// Check send timeout every loop
+		if (!m_sendBuffer.empty())
+		{
+			if (m_lastSendBufferTime == 0)
+				m_lastSendBufferTime = GetTickCount(); // Start timeout
+			else if (GetTickCount() - m_lastSendBufferTime > SOCKET_SEND_TIMEOUT)
+				throw ClientDisconnected("Timed out trying to send data!");
+		}
+
+		switch (waitResult)
+		{
+			case WAIT_OBJECT_0:
+			{
+				WSANETWORKEVENTS netEvents;
+				WSAEnumNetworkEvents(m_socket, m_socketEvent, &netEvents);
+
+				if (netEvents.lNetworkEvents & FD_CLOSE) // Closed connection
+				{
+					throw ClientDisconnected(std::to_string(netEvents.iErrorCode[FD_CLOSE_BIT]));
+				}
+				if (netEvents.lNetworkEvents & FD_READ) // Received data
+				{
+					const int receivedLen = recv(m_socket, buf, len, 0);
+					if (receivedLen > 0)
+						return receivedLen;
+					if (receivedLen == 0)
+						throw ClientDisconnected(0);
+
+					const int err = WSAGetLastError();
+					if (err == WSAEWOULDBLOCK)
+						break; // No more data for now
+					throw std::runtime_error("\"recv\" failed: " + std::to_string(err));
+				}
+				if (netEvents.lNetworkEvents & FD_WRITE) // Socket is writeable
+				{
+					FlushSendBuffer(); // Can send over remaining data in buffer
+				}
+				break;
+			}
+
+			case WAIT_OBJECT_0 + 1: // Send buffer has data
+				FlushSendBuffer();
+				break;
+
+			case WAIT_TIMEOUT:
+				throw ClientDisconnected("Timed out waiting for data!");
+		}
+	}
+}
+
+/* [NON-BLOCKING] Sends over any data left in m_sendBuffer for as long as the socket stays writeable. */
+void
+Socket::FlushSendBuffer()
+{
+	if (m_sendBuffer.empty())
+		return;
+
+	switch (WaitForSingleObject(m_sendBufferMutex, SOCKET_SEND_BUFFER_TIMEOUT_MS))
+	{
+		case WAIT_OBJECT_0: // Acquired ownership of the mutex
+			break;
+		case WAIT_TIMEOUT:
+			throw MutexError("Socket::FlushSendBuffer(): Timed out waiting for send buffer mutex: " + std::to_string(GetLastError()));
+		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
+			throw MutexError("Socket::FlushSendBuffer(): Got ownership of an abandoned send buffer mutex: " + std::to_string(GetLastError()));
+		default:
+			throw MutexError("Socket::FlushSendBuffer(): An error occured waiting for send buffer mutex: " + std::to_string(GetLastError()));
+	}
+
+	const int sentLen = send(m_socket, m_sendBuffer.c_str(), static_cast<int>(m_sendBuffer.length()), 0);
+	if (sentLen == SOCKET_ERROR)
+	{
+		if (!ReleaseMutex(m_sendBufferMutex))
+			throw MutexError("Socket::FlushSendBuffer(): Couldn't release send buffer mutex: " + std::to_string(GetLastError()));
+
+		const int err = WSAGetLastError();
+		if (err == WSAEWOULDBLOCK)
+			return; // Try again on FD_WRITE or next buffered message
+		if (err == WSAECONNRESET || err == WSAECONNABORTED)
+			throw ClientDisconnected(std::to_string(err));
+
+		throw std::runtime_error("\"send\" failed: " + std::to_string(err));
+	}
+
+	std::ostream& log = *m_logStream;
+	log << "[SENT]: ";
+	log.write(m_sendBuffer.c_str(), sentLen);
+	log << "\n(BYTES SENT=" << sentLen << ")\n\n" << std::endl;
+
+	m_sendBuffer.erase(0, sentLen);
+
+	// If all data from buffer was sent, reset timeout
+	if (m_sendBuffer.empty())
+		m_lastSendBufferTime = 0;
+
+	if (!ReleaseMutex(m_sendBufferMutex))
+		throw MutexError("Socket::FlushSendBuffer(): Couldn't release send buffer mutex: " + std::to_string(GetLastError()));
+}
+
+
 int
 Socket::ReceiveData(char* data, int len)
 {
 	if (len == 0)
 		return 0;
 
-	const int receivedLen = recv(m_socket, data, len, 0);
-	if (receivedLen == 0)
-		throw ClientDisconnected();
-	else if (receivedLen < 0)
-		throw std::runtime_error("\"recv\" failed: " + std::to_string(WSAGetLastError()));
+	const int receivedLen = Receive(data, len);
 
 	std::ostream& log = *m_logStream;
 	log << "[RECEIVED]: ";
@@ -361,80 +505,42 @@ Socket::ReceiveData(char* data, int len)
 	return receivedLen;
 }
 
-std::vector<std::vector<std::string>>
-Socket::ReceiveData()
-{
-	char receivedBuf[DEFAULT_BUFLEN];
-
-	const int receivedLen = recv(m_socket, receivedBuf, DEFAULT_BUFLEN, 0);
-	if (receivedLen > 0)
-	{
-		const std::string received(receivedBuf, receivedLen);
-		std::istringstream receivedStream(received);
-
-		std::vector<std::vector<std::string>> receivedEntries;
-		std::string receivedLine;
-		while (std::getline(receivedStream, receivedLine))
-		{
-			if (receivedLine.empty())
-				continue;
-
-			if (receivedLine.back() == '\r')
-			{
-				receivedLine.pop_back(); // Remove carriage return
-				if (receivedLine.empty())
-					continue;
-			}
-
-			receivedEntries.push_back(StringSplit(std::move(receivedLine), "&")); // Split data by "&" for easier parsing in certain cases
-		}
-
-		if (!g_config.logPingMessages && receivedEntries.empty())
-			return {};
-
-		std::ostream& log = *m_logStream;
-		log << "[RECEIVED]: " << std::endl;
-		for (const std::vector<std::string>& receivedLineEntries : receivedEntries)
-		{
-			for (const std::string& entry : receivedLineEntries)
-			{
-				log << entry << std::endl;
-			}
-			log << std::endl;
-		}
-		log << '\n' << std::endl;
-
-		return receivedEntries;
-	}
-	else if (receivedLen == 0)
-	{
-		throw ClientDisconnected();
-	}
-	throw std::runtime_error("\"recv\" failed: " + std::to_string(WSAGetLastError()));
-}
-
-
-int
+void
 Socket::SendData(const char* data, int len)
 {
+	if (m_nonBlocking)
+	{
+		switch (WaitForSingleObject(m_sendBufferMutex, SOCKET_SEND_BUFFER_TIMEOUT_MS))
+		{
+			case WAIT_OBJECT_0: // Acquired ownership of the mutex
+				break;
+			case WAIT_TIMEOUT:
+				throw MutexError("Socket::SendData(): Timed out waiting for send buffer mutex: " + std::to_string(GetLastError()));
+			case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
+				throw MutexError("Socket::SendData(): Got ownership of an abandoned send buffer mutex: " + std::to_string(GetLastError()));
+			default:
+				throw MutexError("Socket::SendData(): An error occured waiting for send buffer mutex: " + std::to_string(GetLastError()));
+		}
+		m_sendBuffer.append(data, len);
+		if (!ReleaseMutex(m_sendBufferMutex))
+			throw MutexError("Socket::SendData(): Couldn't release send buffer mutex: " + std::to_string(GetLastError()));
+
+		SetEvent(m_sendEvent);
+		return;
+	}
+
 	const int sentLen = send(m_socket, data, len, 0);
 	if (sentLen == SOCKET_ERROR)
-		throw std::runtime_error("\"send\" failed: " + std::to_string(WSAGetLastError()));
+	{
+		const int err = WSAGetLastError();
+		if (err == WSAECONNRESET || err == WSAECONNABORTED)
+			throw ClientDisconnected(std::to_string(err));
+
+		throw std::runtime_error("\"send\" failed: " + std::to_string(err));
+	}
 
 	std::ostream& log = *m_logStream;
 	log << "[SENT]: ";
-	log.write(data, sentLen);
-	log << "\n(BYTES SENT=" << sentLen << ")\n\n" << std::endl;
-
-	return sentLen;
-}
-
-void
-Socket::SendData(std::vector<std::string> data)
-{
-	for (const std::string& message : data)
-	{
-		if (!message.empty())
-			SendData(message.c_str(), static_cast<int>(message.length()));
-	}
+	log.write(data, len);
+	log << "\n(BYTES SENT=" << len << ")\n\n" << std::endl;
 }

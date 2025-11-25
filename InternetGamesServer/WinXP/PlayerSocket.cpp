@@ -24,8 +24,6 @@ PlayerSocket::StateToString(State state)
 			return "STATE_PROXY_DISCONNECTED";
 		case STATE_WAITINGFOROPPONENTS:
 			return "STATE_WAITINGFOROPPONENTS";
-		case STATE_STARTING_GAME:
-			return "STATE_STARTING_GAME";
 		case STATE_PLAYING:
 			return "STATE_PLAYING";
 		case STATE_DISCONNECTING:
@@ -36,7 +34,7 @@ PlayerSocket::StateToString(State state)
 }
 
 
-PlayerSocket::PlayerSocket(Socket& socket, const MsgConnectionHi& hiMessage) :
+PlayerSocket::PlayerSocket(Socket& socket, std::ostream& logStream, const MsgConnectionHi& hiMessage) :
 	::PlayerSocket(socket),
 	m_state(STATE_INITIALIZED),
 	m_ID(std::uniform_int_distribution<uint32>{}(g_rng)),
@@ -46,8 +44,7 @@ PlayerSocket::PlayerSocket(Socket& socket, const MsgConnectionHi& hiMessage) :
 	m_clientVersion(ClientVersion::INVALID),
 	m_sequenceID(0),
 	m_proxyConnected(false),
-	m_genericMessageMutex(CreateMutex(nullptr, false, nullptr)),
-	m_acceptsGameMessagesEvent(CreateEvent(nullptr, TRUE, FALSE, nullptr)),
+	m_logStream(logStream),
 	m_incomingGenericMsg(),
 	m_incomingGameMsg(),
 	m_serviceName(),
@@ -59,11 +56,16 @@ PlayerSocket::PlayerSocket(Socket& socket, const MsgConnectionHi& hiMessage) :
 PlayerSocket::~PlayerSocket()
 {
 	Destroy();
-
-	CloseHandle(m_acceptsGameMessagesEvent);
-	CloseHandle(m_genericMessageMutex);
 }
 
+
+#define XPPlayerSocketMatchGuard(funcName) \
+	if (!m_match) \
+		throw std::runtime_error(std::string("WinXP::PlayerSocket::") + funcName + "(): Attempted to access destroyed match!"); \
+	if (m_match->GetState() == Match::STATE_ENDED) \
+		throw std::runtime_error(std::string("WinXP::PlayerSocket::") + funcName + "(): Attempted to access ended match!"); \
+	if (m_state != STATE_PLAYING) \
+		throw std::runtime_error(std::string("WinXP::PlayerSocket::") + funcName + "(): Attempted to access match while not in PLAYING state!");
 
 void
 PlayerSocket::ProcessMessages()
@@ -73,7 +75,7 @@ PlayerSocket::ProcessMessages()
 		AwaitGenericMessageHeader();
 		if (m_incomingGenericMsg.GetType() == MessageConnectionKeepAlive)
 		{
-			AwaitIncomingGenericFooter();
+			ReadIncomingGenericFooter();
 		}
 		else
 		{
@@ -81,7 +83,7 @@ PlayerSocket::ProcessMessages()
 			{
 				case STATE_INITIALIZED:
 				{
-					AwaitProxyHiMessages();
+					ReadProxyHiMessages();
 					SendProxyHelloMessages();
 
 					assert(m_clientVersion != ClientVersion::INVALID);
@@ -89,7 +91,7 @@ PlayerSocket::ProcessMessages()
 				}
 				case STATE_UNCONFIGURED:
 				{
-					AwaitClientConfig();
+					ReadClientConfig();
 
 					MsgUserInfoResponse msgUserInfo;
 					msgUserInfo.ID = m_ID;
@@ -104,8 +106,8 @@ PlayerSocket::ProcessMessages()
 				{
 					assert(!m_proxyConnected);
 
-					/* Await connect request and send response */
-					const MsgProxyServiceRequest msgServiceRequestConnect = AwaitIncomingGenericMessage<MsgProxyServiceRequest, 1>();
+					/* Process connect request and send response */
+					const MsgProxyServiceRequest msgServiceRequestConnect = ReadIncomingGenericMessage<MsgProxyServiceRequest, 1>();
 					if (!ValidateProxyMessage<MessageProxyServiceRequest>(msgServiceRequestConnect))
 						throw std::runtime_error("MsgProxyServiceRequest: Message is invalid!");
 
@@ -119,26 +121,13 @@ PlayerSocket::ProcessMessages()
 					SendProxyServiceInfoMessages(MsgProxyServiceInfo::SERVICE_CONNECT);
 					break;
 				}
-				case STATE_STARTING_GAME:
-				{
-					switch (WaitForSingleObject(m_acceptsGameMessagesEvent, MATCH_MUTEX_TIMEOUT_MS))
-					{
-						case WAIT_OBJECT_0:
-							break;
-						case WAIT_TIMEOUT:
-							throw std::runtime_error("WinXP::PlayerSocket::ProcessMessages(): Timed out waiting for \"accepts game messages\" event!");
-						default:
-							throw std::runtime_error("WinXP::PlayerSocket::ProcessMessages(): An error occured waiting for \"accepts game messages\" event: " + std::to_string(GetLastError()));
-					}
-					// Fallthrough (game messages are now accepted)
-				}
 				case STATE_PLAYING:
 				{
 					switch (m_incomingGenericMsg.GetType())
 					{
 						case MessageGameMessage:
 						{
-							AwaitIncomingGameMessageHeader();
+							ReadIncomingGameMessageHeader();
 
 							XPPlayerSocketMatchGuard("ProcessMessages")
 							m_match->ProcessIncomingGameMessage(*this, m_incomingGameMsg.GetType());
@@ -146,7 +135,7 @@ PlayerSocket::ProcessMessages()
 						}
 						case MessageChatSwitch:
 						{
-							const MsgChatSwitch msgChatSwitch = AwaitIncomingGenericMessage<MsgChatSwitch, MessageChatSwitch>();
+							const MsgChatSwitch msgChatSwitch = ReadIncomingGenericMessage<MsgChatSwitch, MessageChatSwitch>();
 							if (msgChatSwitch.userID != m_ID)
 								throw std::runtime_error("MsgChatSwitch: Incorrect user ID!");
 
@@ -162,8 +151,8 @@ PlayerSocket::ProcessMessages()
 						{
 							assert(m_proxyConnected);
 
-							/* Await disconnect request and send response */
-							const MsgProxyServiceRequest msgServiceRequestDisconnect = AwaitIncomingGenericMessage<MsgProxyServiceRequest, 1>(true);
+							/* Process disconnect request and send response */
+							const MsgProxyServiceRequest msgServiceRequestDisconnect = ReadIncomingGenericMessage<MsgProxyServiceRequest, 1>(true);
 							if (!ValidateProxyMessage<MessageProxyServiceRequest>(msgServiceRequestDisconnect))
 								throw std::runtime_error("MsgProxyServiceRequest: Message is invalid!");
 
@@ -194,6 +183,8 @@ PlayerSocket::ProcessMessages()
 	}
 }
 
+#undef XPPlayerSocketMatchGuard
+
 
 void
 PlayerSocket::OnGameStart(const std::vector<PlayerSocket*>& matchPlayers)
@@ -221,14 +212,11 @@ PlayerSocket::OnGameStart(const std::vector<PlayerSocket*>& matchPlayers)
 		assert(config.skillLevel != Match::SkillLevel::INVALID);
 	}
 
-	m_state = STATE_STARTING_GAME;
-
 	SendGenericMessage<MessageGameStart>(std::move(msgGameStart),
 		sizeof(MsgGameStart) - sizeof(MsgGameStart::User) * (MATCH_MAX_PLAYERS - totalPlayerCount));
 
-	// The match can now send game messages to this client - game start messages have been sent
+	// The match will now be able to send game messages to this client
 	m_state = STATE_PLAYING;
-	SetEvent(m_acceptsGameMessagesEvent);
 }
 
 void
@@ -241,11 +229,10 @@ PlayerSocket::OnDisconnected()
 	}
 	m_proxyConnected = false;
 	m_state = STATE_DISCONNECTING;
-	ResetEvent(m_acceptsGameMessagesEvent);
 }
 
 void
-PlayerSocket::OnMatchDisconnect()
+PlayerSocket::OnMatchDisconnect() noexcept
 {
 	if (!m_match)
 		return;
@@ -253,7 +240,6 @@ PlayerSocket::OnMatchDisconnect()
 	m_match = nullptr;
 	m_proxyConnected = false;
 	m_state = STATE_PROXY_DISCONNECTED;
-	ResetEvent(m_acceptsGameMessagesEvent);
 
 	SendProxyServiceInfoMessages(MsgProxyServiceInfo::SERVICE_DISCONNECT);
 }
@@ -262,43 +248,38 @@ PlayerSocket::OnMatchDisconnect()
 void
 PlayerSocket::AwaitGenericMessageHeader()
 {
-	assert(!m_incomingGenericMsg.valid && !m_incomingGameMsg.valid);
+	assert(m_incomingGenericMsg.buffer.empty() && !m_incomingGameMsg.valid);
 
-	m_socket.ReceiveData(m_incomingGenericMsg.base, DecryptMessage, m_securityKey);
+	int receivedLen = 0;
+	while (receivedLen < sizeof(MsgBaseGeneric))
+		receivedLen += m_socket.ReceiveData(reinterpret_cast<char*>(&m_incomingGenericMsg.base) + receivedLen,
+			sizeof(m_incomingGenericMsg.base) - receivedLen);
+	DecryptMessage(&m_incomingGenericMsg.base, sizeof(m_incomingGenericMsg.base), m_securityKey);
+	m_logStream << "[PROCESSED]: " << m_incomingGenericMsg.base << "\n\n" << std::endl;
+
 	if (!ValidateInternalMessageNoTotalLength<MessageConnectionGeneric>(m_incomingGenericMsg.base))
 		throw std::runtime_error("MsgBaseGeneric: Message is invalid!");
 
-	switch (WaitForSingleObject(m_genericMessageMutex, MATCH_MUTEX_TIMEOUT_MS))
-	{
-		case WAIT_OBJECT_0: // Acquired ownership of the mutex
-			break;
-		case WAIT_TIMEOUT:
-			throw std::runtime_error("WinXP::PlayerSocket::AwaitGenericMessageHeader(): Timed out waiting for generic message mutex: " + std::to_string(GetLastError()));
-		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
-			throw std::runtime_error("WinXP::PlayerSocket::AwaitGenericMessageHeader(): Got ownership of an abandoned generic message mutex: " + std::to_string(GetLastError()));
-		default:
-			throw std::runtime_error("WinXP::PlayerSocket::AwaitGenericMessageHeader(): An error occured waiting for generic message mutex: " + std::to_string(GetLastError()));
-	}
+	const int dataLen = m_incomingGenericMsg.base.totalLength - sizeof(MsgBaseGeneric);
+	if (dataLen < sizeof(MsgBaseApplication) + sizeof(MsgFooterGeneric))
+		throw std::runtime_error("MsgBaseGeneric: totalLength is invalid!");
+	char dataBuf[2048];
+	if (dataLen > sizeof(dataBuf))
+		throw std::runtime_error("MsgBaseApplication: Incoming data is longer than buffer!");
+	receivedLen = 0;
+	while (receivedLen < dataLen)
+		receivedLen += m_socket.ReceiveData(dataBuf + receivedLen, dataLen - receivedLen);
+	DecryptMessage(dataBuf, dataLen - sizeof(MsgFooterGeneric), m_securityKey); // MsgFooterGeneric is not encrypted
+	m_incomingGenericMsg.buffer.append(dataBuf, dataLen);
 
-	try
-	{
-		m_socket.ReceiveData(m_incomingGenericMsg.info, DecryptMessage, m_securityKey);
-	}
-	catch (...)
-	{
-		ReleaseMutex(m_genericMessageMutex);
-		throw;
-	}
-
-	m_incomingGenericMsg.valid = true;
+	ReadIncomingMessage(m_incomingGenericMsg.info);
 }
 
-void
-PlayerSocket::AwaitIncomingGameMessageHeader()
-{
-	assert(m_incomingGenericMsg.valid && !m_incomingGameMsg.valid);
 
-	XPPlayerSocketMatchGuard("AwaitIncomingGameMessageHeader")
+void
+PlayerSocket::ReadIncomingGameMessageHeader()
+{
+	assert(!m_incomingGenericMsg.buffer.empty() && !m_incomingGameMsg.valid);
 
 	assert(m_proxyConnected);
 
@@ -315,29 +296,20 @@ PlayerSocket::AwaitIncomingGameMessageHeader()
 	if (msgBaseApp.dataLength < sizeof(MsgGameMessage))
 		throw std::runtime_error("MsgBaseApplication: Data is of incorrect size! Expected: equal or more than " + std::to_string(sizeof(MsgGameMessage)));
 
-	try
-	{
-		m_socket.ReceiveData(m_incomingGameMsg.info, DecryptMessage, m_securityKey);
-	}
-	catch (...)
-	{
-		ReleaseMutex(m_genericMessageMutex);
-		throw;
-	}
+	ReadIncomingMessage(m_incomingGameMsg.info);
 
 	m_incomingGameMsg.valid = true;
 }
 
 void
-PlayerSocket::AwaitIncomingEmptyGameMessage(uint32 type)
+PlayerSocket::ReadIncomingEmptyGameMessage(uint32 type)
 {
-	assert(m_incomingGenericMsg.valid && m_incomingGameMsg.valid);
+	assert(!m_incomingGenericMsg.buffer.empty() && m_incomingGameMsg.valid);
 
 	const MsgBaseGeneric& msgBaseGeneric = m_incomingGenericMsg.base;
 	const MsgBaseApplication& msgBaseApp = m_incomingGenericMsg.info;
 	const MsgGameMessage& msgGameMessage = m_incomingGameMsg.info;
 
-	XPPlayerSocketMatchGuard("AwaitIncomingEmptyGameMessage")
 	if (msgGameMessage.gameID != m_match->GetGameID())
 		throw std::runtime_error("MsgGameMessage: Incorrect game ID!");
 	if (msgGameMessage.type != type)
@@ -345,7 +317,7 @@ PlayerSocket::AwaitIncomingEmptyGameMessage(uint32 type)
 	if (msgGameMessage.length != 0)
 		throw std::runtime_error("MsgGameMessage: length is invalid: Expected empty message!");
 
-	AwaitIncomingGenericFooter();
+	ReadIncomingGenericFooter();
 	m_incomingGameMsg.valid = false;
 
 	// Validate checksum
@@ -358,34 +330,26 @@ PlayerSocket::AwaitIncomingEmptyGameMessage(uint32 type)
 }
 
 void
-PlayerSocket::AwaitIncomingGenericFooter()
+PlayerSocket::ReadIncomingGenericFooter()
 {
 	MsgFooterGeneric msgFooterGeneric;
-	try
-	{
-		m_socket.ReceiveData(msgFooterGeneric);
-	}
-	catch (...)
-	{
-		ReleaseMutex(m_genericMessageMutex);
-		throw;
-	}
+	ReadIncomingMessage(msgFooterGeneric);
 	if (msgFooterGeneric.status == MsgFooterGeneric::STATUS_CANCELLED)
 		throw std::runtime_error("MsgFooterGeneric: Status is CANCELLED!");
 	else if (msgFooterGeneric.status != MsgFooterGeneric::STATUS_OK)
 		throw std::runtime_error("MsgFooterGeneric: Status is not OK! - " + std::to_string(msgFooterGeneric.status));
 
-	m_incomingGenericMsg.valid = false;
+	if (!m_incomingGenericMsg.buffer.empty())
+		throw std::runtime_error("Garbage data after footer!");
 
-	if (!ReleaseMutex(m_genericMessageMutex))
-		throw std::runtime_error("WinXP::PlayerSocket::AwaitIncomingGenericFooter(): Couldn't release generic message mutex: " + std::to_string(GetLastError()));
+	m_incomingGenericMsg.buffer.clear();
 }
 
 
 void
-PlayerSocket::AwaitProxyHiMessages()
+PlayerSocket::ReadProxyHiMessages()
 {
-	Util::MsgProxyHiCollection msg = AwaitIncomingGenericMessage<Util::MsgProxyHiCollection, 3>();
+	Util::MsgProxyHiCollection msg = ReadIncomingGenericMessage<Util::MsgProxyHiCollection, 3>();
 	if (!ValidateProxyMessage<MessageProxyHi>(msg.hi))
 		throw std::runtime_error("MsgProxyHi: Message is invalid!");
 	if (!ValidateProxyMessage<MessageProxyID>(msg.ID))
@@ -421,9 +385,9 @@ PlayerSocket::AwaitProxyHiMessages()
 }
 
 void
-PlayerSocket::AwaitClientConfig()
+PlayerSocket::ReadClientConfig()
 {
-	MsgClientConfig msg = AwaitIncomingGenericMessage<MsgClientConfig, MessageClientConfig>();
+	MsgClientConfig msg = ReadIncomingGenericMessage<MsgClientConfig, MessageClientConfig>();
 	if (msg.protocolSignature != XPRoomProtocolSignature)
 		throw std::runtime_error("MsgClientConfig: Invalid protocol signature!");
 	if (msg.protocolVersion != XPRoomClientVersion)
@@ -545,7 +509,6 @@ PlayerSocket::SendProxyServiceInfoMessages(MsgProxyServiceInfo::Reason reason)
 		}
 		m_proxyConnected = false;
 		m_state = STATE_PROXY_DISCONNECTED;
-		ResetEvent(m_acceptsGameMessagesEvent);
 	}
 }
 

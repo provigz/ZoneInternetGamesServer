@@ -35,7 +35,7 @@ BackgammonMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 typ
 			{
 				case MatchPlayerState::AWAITING_CHECKIN:
 				{
-					const MsgCheckIn msgCheckIn = player.OnMatchAwaitGameMessage<MsgCheckIn, MessageCheckIn>();
+					const MsgCheckIn msgCheckIn = player.OnMatchReadGameMessage<MsgCheckIn, MessageCheckIn>();
 					if (msgCheckIn.protocolSignature != XPBackgammonProtocolSignature)
 						throw std::runtime_error("Backgammon::MsgCheckIn: Invalid protocol signature!");
 					if (msgCheckIn.protocolVersion != XPBackgammonProtocolVersion)
@@ -67,7 +67,7 @@ BackgammonMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 typ
 					if (m_playerStates[1] != MatchPlayerState::WAITING_FOR_MATCH_START)
 						throw std::runtime_error("MessageNewMatch: Player at seat 1 was not ready for start!");
 
-					player.OnMatchAwaitEmptyGameMessage(MessageNewMatch);
+					player.OnMatchReadEmptyGameMessage(MessageNewMatch);
 
 					m_playerStates[0] = MatchPlayerState::END_GAME;
 					m_playerStates[1] = MatchPlayerState::END_GAME;
@@ -86,7 +86,7 @@ BackgammonMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 typ
 					if (!XPBackgammonIsSeatHost(player.m_seat))
 						throw std::runtime_error("Backgammon::MsgFirstMove: Only the host (seat 0) can send this message!");
 
-					const MsgFirstMove msgFirstMove = player.OnMatchAwaitGameMessage<MsgFirstMove, MessageFirstMove>();
+					const MsgFirstMove msgFirstMove = player.OnMatchReadGameMessage<MsgFirstMove, MessageFirstMove>();
 					return;
 				}
 				case MessageFirstRoll:
@@ -94,7 +94,7 @@ BackgammonMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 typ
 					if (m_playerStates[player.m_seat] != MatchPlayerState::END_GAME)
 						throw std::runtime_error("Backgammon::MsgEndTurn (MessageFirstRoll): Incorrect player state: " + XPBackgammonMatchStateToNumString(player.m_seat));
 
-					const MsgEndTurn msgFirstRoll = player.OnMatchAwaitGameMessage<MsgEndTurn, MessageFirstRoll>();
+					const MsgEndTurn msgFirstRoll = player.OnMatchReadGameMessage<MsgEndTurn, MessageFirstRoll>();
 					if (msgFirstRoll.seat != player.m_seat)
 						throw std::runtime_error("Backgammon::MsgEndTurn (MessageFirstRoll): Incorrect seat!");
 
@@ -114,7 +114,7 @@ BackgammonMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 typ
 					if (!XPBackgammonIsSeatHost(player.m_seat))
 						throw std::runtime_error("Backgammon::MsgEndTurn (MessageTieRoll): Only the host (seat 0) can send this message!");
 
-					const MsgEndTurn msgTieRoll = player.OnMatchAwaitGameMessage<MsgEndTurn, MessageTieRoll>();
+					const MsgEndTurn msgTieRoll = player.OnMatchReadGameMessage<MsgEndTurn, MessageTieRoll>();
 					if (msgTieRoll.seat != player.m_seat)
 						throw std::runtime_error("Backgammon::MsgEndTurn (MessageTieRoll): Incorrect seat!");
 
@@ -124,7 +124,7 @@ BackgammonMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 typ
 				}
 				case MessageDiceRollRequest:
 				{
-					const MsgDiceRollRequest msgDiceRollRequest = player.OnMatchAwaitGameMessage<MsgDiceRollRequest, MessageDiceRollRequest>();
+					const MsgDiceRollRequest msgDiceRollRequest = player.OnMatchReadGameMessage<MsgDiceRollRequest, MessageDiceRollRequest>();
 					if (msgDiceRollRequest.seat != player.m_seat)
 						throw std::runtime_error("Backgammon::MsgDiceRollRequest: Incorrect seat!");
 
@@ -138,14 +138,14 @@ BackgammonMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 typ
 				}
 				case MessageEndTurn:
 				{
-					const MsgEndTurn msgEndTurn = player.OnMatchAwaitGameMessage<MsgEndTurn, MessageEndTurn>();
+					const MsgEndTurn msgEndTurn = player.OnMatchReadGameMessage<MsgEndTurn, MessageEndTurn>();
 					if (msgEndTurn.seat != player.m_seat)
 						throw std::runtime_error("Backgammon::MsgEndTurn: Incorrect seat!");
 					return;
 				}
 				case MessageEndGame:
 				{
-					const MsgEndTurn msgEndGame = player.OnMatchAwaitGameMessage<MsgEndTurn, MessageEndGame>();
+					const MsgEndTurn msgEndGame = player.OnMatchReadGameMessage<MsgEndTurn, MessageEndGame>();
 					if (msgEndGame.seat != player.m_seat)
 						throw std::runtime_error("Backgammon::MsgEndTurn (MessageEndGame): Incorrect seat!");
 
@@ -156,7 +156,7 @@ BackgammonMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 typ
 				}
 				case MessageEndMatch:
 				{
-					const MsgEndMatch msgEndMatch = player.OnMatchAwaitGameMessage<MsgEndMatch, MessageEndMatch>();
+					const MsgEndMatch msgEndMatch = player.OnMatchReadGameMessage<MsgEndMatch, MessageEndMatch>();
 					if (msgEndMatch.reason != MsgEndMatch::REASON_FORFEIT &&
 						msgEndMatch.reason != MsgEndMatch::REASON_GAMEOVER)
 						throw std::runtime_error("Backgammon::MsgEndMatch: Invalid reason!");
@@ -184,7 +184,7 @@ BackgammonMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 typ
 			{
 				case MessageEndGame:
 				{
-					const MsgEndTurn msgEndGame = player.OnMatchAwaitGameMessage<MsgEndTurn, MessageEndGame>();
+					const MsgEndTurn msgEndGame = player.OnMatchReadGameMessage<MsgEndTurn, MessageEndGame>();
 					if (msgEndGame.seat != player.m_seat)
 						throw std::runtime_error("Backgammon::MsgEndTurn (MessageEndGame): Incorrect seat!");
 					return;
@@ -194,7 +194,7 @@ BackgammonMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 typ
 					if (m_players.size() != GetRequiredPlayerCount())
 						throw std::runtime_error("Backgammon::MessageNewMatch: Cannot proceed as players are missing!");
 
-					player.OnMatchAwaitEmptyGameMessage(MessageNewMatch);
+					player.OnMatchReadEmptyGameMessage(MessageNewMatch);
 
 					m_playerStates[0] = MatchPlayerState::END_GAME;
 					m_playerStates[1] = MatchPlayerState::END_GAME;
@@ -212,7 +212,7 @@ BackgammonMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 typ
 		case MessageStateTransaction:
 		{
 			const std::pair<MsgStateTransaction, Array<MsgStateTransaction::Transaction, XPBackgammonMaxStateTransactionsSize>> msgTransaction =
-				player.OnMatchAwaitGameMessage<MsgStateTransaction, MessageStateTransaction, MsgStateTransaction::Transaction, XPBackgammonMaxStateTransactionsSize>();
+				player.OnMatchReadGameMessage<MsgStateTransaction, MessageStateTransaction, MsgStateTransaction::Transaction, XPBackgammonMaxStateTransactionsSize>();
 			if (msgTransaction.first.userID != player.GetID())
 				throw std::runtime_error("MsgStateTransaction: Incorrect user ID!");
 			if (msgTransaction.first.seat != player.m_seat)
@@ -249,7 +249,7 @@ BackgammonMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 typ
 		case MessageChatMessage:
 		{
 			std::pair<MsgChatMessage, Array<char, 128>> msgChat =
-				player.OnMatchAwaitGameMessage<MsgChatMessage, MessageChatMessage, char, 128>();
+				player.OnMatchReadGameMessage<MsgChatMessage, MessageChatMessage, char, 128>();
 			if (msgChat.first.userID != player.GetID())
 				throw std::runtime_error("Backgammon::MsgChatMessage: Incorrect user ID!");
 			if (msgChat.first.seat != player.m_seat)

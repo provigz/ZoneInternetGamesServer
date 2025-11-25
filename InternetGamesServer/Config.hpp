@@ -25,7 +25,6 @@ public:
 	USHORT port;
 
 	std::string logsDirectory;
-	bool logPingMessages; // DEBUG: Log empty ping messages from Windows 7 clients
 
 	USHORT numConnectionsPerIP;
 

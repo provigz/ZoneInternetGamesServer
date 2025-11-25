@@ -579,7 +579,7 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 			if (m_playersCheckedIn[player.m_seat])
 				break;
 
-			const MsgCheckIn msgCheckIn = player.OnMatchAwaitGameMessage<MsgCheckIn, MessageCheckIn>();
+			const MsgCheckIn msgCheckIn = player.OnMatchReadGameMessage<MsgCheckIn, MessageCheckIn>();
 			if (msgCheckIn.protocolSignature != XPHeartsProtocolSignature)
 				throw std::runtime_error("Hearts::MsgCheckIn: Invalid protocol signature!");
 			if (msgCheckIn.protocolVersion != XPHeartsProtocolVersion)
@@ -596,7 +596,7 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		{
 			if (type == MessagePass)
 			{
-				const MsgPass msgPass = player.OnMatchAwaitGameMessage<MsgPass, MessagePass>();
+				const MsgPass msgPass = player.OnMatchReadGameMessage<MsgPass, MessagePass>();
 				if (msgPass.seat != player.m_seat)
 					throw std::runtime_error("Hearts::MsgPass: Incorrect player seat!");
 				if (msgPass.cards[0] == msgPass.cards[1] || msgPass.cards[1] == msgPass.cards[2])
@@ -616,7 +616,7 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		{
 			if (type == MessagePlay)
 			{
-				const MsgPlay msgPlay = player.OnMatchAwaitGameMessage<MsgPlay, MessagePlay>();
+				const MsgPlay msgPlay = player.OnMatchReadGameMessage<MsgPlay, MessagePlay>();
 				if (msgPlay.seat != player.m_seat)
 					throw std::runtime_error("Hearts::MsgPlay: Incorrect player seat!");
 				if (!IsValidXPCardValue(msgPlay.card))
@@ -666,7 +666,7 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		{
 			if (type == MessageNewGameVote)
 			{
-				MsgNewGameVote msgNewGameVote = player.OnMatchAwaitGameMessage<MsgNewGameVote, MessageNewGameVote>();
+				MsgNewGameVote msgNewGameVote = player.OnMatchReadGameMessage<MsgNewGameVote, MessageNewGameVote>();
 				if (msgNewGameVote.seat != player.m_seat)
 					throw std::runtime_error("Hearts::MsgNewGameVote: Incorrect player seat!");
 
@@ -685,7 +685,7 @@ HeartsMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		case MessageChatMessage:
 		{
 			std::pair<MsgChatMessage, Array<char, 128>> msgChat =
-				player.OnMatchAwaitGameMessage<MsgChatMessage, MessageChatMessage, char, 128>();
+				player.OnMatchReadGameMessage<MsgChatMessage, MessageChatMessage, char, 128>();
 			if (msgChat.first.userID != player.GetID())
 				throw std::runtime_error("Hearts::MsgChatMessage: Incorrect user ID!");
 			// msgChat.first.seat is always 0, thus invalid and will not be validated

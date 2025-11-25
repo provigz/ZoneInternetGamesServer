@@ -13,6 +13,7 @@ public:
 	enum State {
 		STATE_INITIALIZED,
 		STATE_JOINING,
+		STATE_JOININGCONFIRM,
 		STATE_WAITINGFOROPPONENTS,
 		STATE_PLAYING
 	};
@@ -49,7 +50,7 @@ private:
 	std::string ConstructReadyMessage() const;
 	std::string ConstructStateMessage(const std::string& xml) const;
 
-	std::vector<std::string> GetResponse(const std::vector<std::string>& receivedData, bool& skipOtherLines);
+	std::string GetResponse(const std::vector<std::string>& receivedData);
 
 private:
 	ChangeTimeTracker<State> m_state;

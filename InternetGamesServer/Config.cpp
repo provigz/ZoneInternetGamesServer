@@ -14,7 +14,6 @@ Config::Config() :
 	m_file(),
 	port(DEFAULT_PORT),
 	logsDirectory(DEFAULT_LOGS_DIRECTORY),
-	logPingMessages(false),
 	numConnectionsPerIP(0),
 	skipLevelMatching(false),
 	allowSinglePlayer(true),
@@ -61,11 +60,6 @@ Config::Load(const std::string& file)
 		tinyxml2::XMLElement* elLogsDirectory = elRoot->FirstChildElement("LogsDirectory");
 		if (elLogsDirectory && elLogsDirectory->GetText())
 			logsDirectory = elLogsDirectory->GetText();
-	}
-	{
-		tinyxml2::XMLElement* elLogPingMessages = elRoot->FirstChildElement("LogPingMessages");
-		if (elLogPingMessages && elLogPingMessages->GetText())
-			logPingMessages = *elLogPingMessages->GetText() == '1';
 	}
 	{
 		tinyxml2::XMLElement* elNumConnectionsPerIP = elRoot->FirstChildElement("NumConnectionsPerIP");
@@ -120,7 +114,6 @@ Config::Save()
 
 	NewElementWithText(elRoot, "Port", port);
 	NewElementWithText(elRoot, "LogsDirectory", logsDirectory.c_str());
-	NewElementWithText(elRoot, "LogPingMessages", logPingMessages ? "1" : "0");
 	NewElementWithText(elRoot, "NumConnectionsPerIP", numConnectionsPerIP);
 	NewElementWithText(elRoot, "SkipLevelMatching", skipLevelMatching ? "1" : "0");
 	NewElementWithText(elRoot, "AllowSinglePlayer", allowSinglePlayer ? "1" : "0");
@@ -142,7 +135,6 @@ Config::Save()
 const std::initializer_list<std::pair<std::string, std::string>> Config::s_optionKeys = {
 	{ "port", "The port the server should be hosted on. Requires restart to apply. (Default: 28805)" },
 	{ "logdir", "The directory where log files are written to. Set to 0 to disable logging. Requires restart to fully apply. (Default: \"InternetGamesServer_logs\")" },
-	{ "logping", "Log empty ping messages from Windows 7 clients. Aimed towards debugging. Value can only be 0 or 1. (Default: 0)" },
 	{ "numconnsip", "Limits the number of connections allowed from a given IP address. Maximum is 65535. 0 signifies no limit. NOTE: Make this 0 or higher than 1 to keep XP ad banner functionality! (Default: 0)" },
 	{ "skiplevel", "Do not match players in matches based on skill level. Value can only be 0 or 1. (Default: 0)" },
 	{ "singleplayer", "Allow matches, which support computer players, to exist with only one real player. (Default: 1)" },
@@ -156,8 +148,6 @@ Config::GetValue(const std::string& key) const
 		return std::to_string(port);
 	if (key == "logdir")
 		return logsDirectory;
-	if (key == "logping")
-		return logPingMessages ? "1" : "0";
 	if (key == "numconnsip")
 		return std::to_string(numConnectionsPerIP);
 	if (key == "skiplevel")
@@ -195,8 +185,6 @@ Config::SetValue(const std::string& key, const std::string& value)
 		CreateNestedDirectories(value);
 		logsDirectory = value;
 	}
-	else if (key == "logping")
-		CONFIG_SET_BOOL_VALUE(logPingMessages);
 	else if (key == "numconnsip")
 	{
 		try

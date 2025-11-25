@@ -17,6 +17,8 @@ PlayerSocket::StateToString(State state)
 			return "STATE_INITIALIZED";
 		case STATE_JOINING:
 			return "STATE_JOINING";
+		case STATE_JOININGCONFIRM:
+			return "STATE_JOININGCONFIRM";
 		case STATE_WAITINGFOROPPONENTS:
 			return "STATE_WAITINGFOROPPONENTS";
 		case STATE_PLAYING:
@@ -48,16 +50,23 @@ PlayerSocket::~PlayerSocket()
 void
 PlayerSocket::ProcessMessages()
 {
+	std::string messageBuffer;
+	char receivedBuf[2048];
 	while (true)
 	{
-		const std::vector<std::vector<std::string>> receivedData = m_socket.ReceiveData();
+		const int receivedLen = m_socket.ReceiveData(receivedBuf, sizeof(receivedBuf));
+		messageBuffer.append(receivedBuf, receivedLen);
 
-		bool skipLines = false;
-		for (const std::vector<std::string>& receivedLineData : receivedData)
+		size_t lineBreakPos;
+		while ((lineBreakPos = messageBuffer.find("\r\n")) != std::string::npos)
 		{
-			m_socket.SendData(GetResponse(receivedLineData, skipLines));
-			if (skipLines)
-				break;
+			const std::string message = messageBuffer.substr(0, lineBreakPos);
+			messageBuffer.erase(0, lineBreakPos + 2);
+
+			if (message.empty())
+				continue;
+
+			m_socket.SendData(GetResponse(StringSplit(message, "&"))); // Split data by "&" for easier parsing in certain cases
 		}
 
 		// Time out the client in states not involving participation in a match
@@ -71,8 +80,8 @@ PlayerSocket::ProcessMessages()
 	}
 }
 
-std::vector<std::string>
-PlayerSocket::GetResponse(const std::vector<std::string>& receivedData, bool& skipOtherLines)
+std::string
+PlayerSocket::GetResponse(const std::vector<std::string>& receivedData)
 {
 	if (receivedData[0] == "LEAVE\r\n") // The client has requested to be disconnected from the server
 	{
@@ -94,16 +103,22 @@ PlayerSocket::GetResponse(const std::vector<std::string>& receivedData, bool& sk
 
 				m_state = STATE_JOINING;
 				m_guid = StringSplit(receivedData[0], "=")[1];
-				return { ConstructJoinContextMessage() };
+				return ConstructJoinContextMessage();
 			}
 			break;
 
 		case STATE_JOINING:
 			if (StartsWith(receivedData[0], "PLAY match"))
 			{
-				skipOtherLines = true;
+				m_state = STATE_JOININGCONFIRM;
+				return {};
+			}
+			break;
+		case STATE_JOININGCONFIRM:
+			if (StartsWith(receivedData[0], "AT ")) // TODO: Maybe parse and check the following GUIDs... although it doesn't matter
+			{
 				m_state = STATE_WAITINGFOROPPONENTS;
-				return { ConstructReadyMessage(), ConstructStateMessage(m_match->ConstructReadyXML()) };
+				return ConstructReadyMessage() + ConstructStateMessage(m_match->ConstructReadyXML());
 			}
 			break;
 
@@ -112,19 +127,17 @@ PlayerSocket::GetResponse(const std::vector<std::string>& receivedData, bool& sk
 			{
 				// Send a game start message
 				const StateSTag startTag = StateSTag::ConstructGameStart();
-				std::vector<std::string> results = {
-					ConstructStateMessage(m_match->ConstructStateXML({ &startTag }))
-				};
+				std::string messages = ConstructStateMessage(m_match->ConstructStateXML({ &startTag }));
 
 				// Include any additional messages, given on game start, by the match
 				const std::vector<std::string> stateXMLs = m_match->ConstructGameStartMessagesXML(*this);
 				for (const std::string& stateXML : stateXMLs)
 				{
 					const StateSTag stateTag = StateSTag::ConstructEventReceive(stateXML);
-					results.push_back(ConstructStateMessage(m_match->ConstructStateXML({ &stateTag })));
+					messages += ConstructStateMessage(m_match->ConstructStateXML({ &stateTag }));
 				}
 
-				return results;
+				return messages;
 			}
 			else if (receivedData[0] == "CALL EventSend messageID=EventSend" && receivedData.size() > 1 &&
 				StartsWith(receivedData[1], "XMLDataString=")) // An event is being sent, let the Match send it to all other players
@@ -167,7 +180,7 @@ PlayerSocket::OnGameStart()
 
 	// Send a game initialization message
 	const StateSTag tag = StateSTag::ConstructGameInit(m_match->ConstructGameInitXML(this));
-	m_socket.SendData({ ConstructStateMessage(m_match->ConstructStateXML({ &tag })) });
+	m_socket.SendData(ConstructStateMessage(m_match->ConstructStateXML({ &tag })));
 }
 
 void
@@ -192,14 +205,14 @@ PlayerSocket::OnEventReceive(const std::string& xml) const
 {
 	// Send an event receive message
 	const StateSTag tag = StateSTag::ConstructEventReceive(xml);
-	m_socket.SendData({ ConstructStateMessage(m_match->ConstructStateXML({ &tag })) });
+	m_socket.SendData(ConstructStateMessage(m_match->ConstructStateXML({ &tag })));
 }
 
 void
 PlayerSocket::OnChat(const StateChatTag* tag)
 {
 	// Send the "chatbyid" tag
-	m_socket.SendData({ ConstructStateMessage(m_match->ConstructStateXML({ tag })) });
+	m_socket.SendData(ConstructStateMessage(m_match->ConstructStateXML({ tag })));
 }
 
 

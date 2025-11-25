@@ -37,7 +37,7 @@ ReversiMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 			if (m_playersCheckedIn[player.m_seat])
 				break;
 
-			MsgCheckIn msgCheckIn = player.OnMatchAwaitGameMessage<MsgCheckIn, MessageCheckIn>();
+			MsgCheckIn msgCheckIn = player.OnMatchReadGameMessage<MsgCheckIn, MessageCheckIn>();
 			if (msgCheckIn.protocolSignature != XPReversiProtocolSignature)
 				throw std::runtime_error("Reversi::MsgCheckIn: Invalid protocol signature!");
 			if (msgCheckIn.protocolVersion != (player.IsWinME() ? MEReversiProtocolVersion : XPReversiProtocolVersion))
@@ -70,7 +70,7 @@ ReversiMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 					if (m_playerResigned != -1)
 						throw std::runtime_error("Reversi::MsgMovePiece: Player has resigned!");
 
-					MsgMovePiece msgMovePiece = player.OnMatchAwaitGameMessage<MsgMovePiece, MessageMovePiece>();
+					MsgMovePiece msgMovePiece = player.OnMatchReadGameMessage<MsgMovePiece, MessageMovePiece>();
 					if (msgMovePiece.seat != player.m_seat)
 						throw std::runtime_error("Reversi::MsgMovePiece: Incorrect player seat!");
 
@@ -82,7 +82,7 @@ ReversiMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 					if (m_playerResigned != -1)
 						throw std::runtime_error("Reversi::MsgEndGame: Player has resigned!");
 
-					MsgEndGame msgEndGame = player.OnMatchAwaitGameMessage<MsgEndGame, MessageEndGame>();
+					MsgEndGame msgEndGame = player.OnMatchReadGameMessage<MsgEndGame, MessageEndGame>();
 					if (msgEndGame.seat != player.m_seat)
 						throw std::runtime_error("Reversi::MsgEndGame: Incorrect player seat!");
 
@@ -97,7 +97,7 @@ ReversiMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 					if (!XPReversiIsSeatHost(player.m_seat))
 						throw std::runtime_error("Reversi::MsgEndMatch: Only the host (seat 0) can send this message!");
 
-					MsgEndMatch msgEndMatch = player.OnMatchAwaitGameMessage<MsgEndMatch, MessageEndMatch>();
+					MsgEndMatch msgEndMatch = player.OnMatchReadGameMessage<MsgEndMatch, MessageEndMatch>();
 					if (msgEndMatch.seatLost < 0 || msgEndMatch.seatLost > 2)
 						throw std::runtime_error("Reversi::MsgEndMatch: Invalid lost seat!");
 					if (m_playerResigned != -1 && (msgEndMatch.reason != MsgEndMatch::REASON_GAMEOVER || msgEndMatch.seatLost != m_playerResigned))
@@ -116,7 +116,7 @@ ReversiMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		{
 			if (type == MessageCheckIn)
 			{
-				MsgCheckIn msgCheckIn = player.OnMatchAwaitGameMessage<MsgCheckIn, MessageCheckIn>();
+				MsgCheckIn msgCheckIn = player.OnMatchReadGameMessage<MsgCheckIn, MessageCheckIn>();
 				if (player.IsWinME())
 				{
 					// msgCheckIn.protocolSignature should be undefined
@@ -162,7 +162,7 @@ ReversiMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		case MessageChatMessage:
 		{
 			std::pair<MsgChatMessage, Array<char, 128>> msgChat =
-				player.OnMatchAwaitGameMessage<MsgChatMessage, MessageChatMessage, char, 128>();
+				player.OnMatchReadGameMessage<MsgChatMessage, MessageChatMessage, char, 128>();
 			if (msgChat.first.seat != player.m_seat)
 				throw std::runtime_error("Reversi::MsgChatMessage: Incorrect player seat!");
 

@@ -336,7 +336,7 @@ SpadesMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 			if (m_playersCheckedIn[player.m_seat])
 				break;
 
-			const MsgCheckIn msgCheckIn = player.OnMatchAwaitGameMessage<MsgCheckIn, MessageCheckIn>();
+			const MsgCheckIn msgCheckIn = player.OnMatchReadGameMessage<MsgCheckIn, MessageCheckIn>();
 			if (msgCheckIn.protocolSignature != XPSpadesProtocolSignature)
 				throw std::runtime_error("Spades::MsgCheckIn: Invalid protocol signature!");
 			if (msgCheckIn.protocolVersion != XPSpadesProtocolVersion)
@@ -357,7 +357,7 @@ SpadesMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 			{
 				case MessageShowCards:
 				{
-					const MsgShowCards msgShowCards = player.OnMatchAwaitGameMessage<MsgShowCards, MessageShowCards>();
+					const MsgShowCards msgShowCards = player.OnMatchReadGameMessage<MsgShowCards, MessageShowCards>();
 					if (msgShowCards.seat != player.m_seat)
 						throw std::runtime_error("Spades::MsgShowCards: Incorrect player seat!");
 
@@ -369,7 +369,7 @@ SpadesMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 				}
 				case MessageBid:
 				{
-					const MsgBid msgBid = player.OnMatchAwaitGameMessage<MsgBid, MessageBid>();
+					const MsgBid msgBid = player.OnMatchReadGameMessage<MsgBid, MessageBid>();
 					if (msgBid.seat != player.m_seat)
 						throw std::runtime_error("Spades::MsgBid: Incorrect player seat!");
 					if ((msgBid.bid < 0 || msgBid.bid > 13) && msgBid.bid != MsgBid::BID_DOUBLE_NIL)
@@ -415,7 +415,7 @@ SpadesMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		{
 			if (type == MessagePlay)
 			{
-				const MsgPlay msgPlay = player.OnMatchAwaitGameMessage<MsgPlay, MessagePlay>();
+				const MsgPlay msgPlay = player.OnMatchReadGameMessage<MsgPlay, MessagePlay>();
 				if (msgPlay.seat != player.m_seat)
 					throw std::runtime_error("Spades::MsgPlay: Incorrect player seat!");
 
@@ -448,7 +448,7 @@ SpadesMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		{
 			if (type == MessageNewGameVote)
 			{
-				const MsgNewGameVote msgNewGameVote = player.OnMatchAwaitGameMessage<MsgNewGameVote, MessageNewGameVote>();
+				const MsgNewGameVote msgNewGameVote = player.OnMatchReadGameMessage<MsgNewGameVote, MessageNewGameVote>();
 				if (msgNewGameVote.seat != player.m_seat)
 					throw std::runtime_error("Spades::MsgNewGameVote: Incorrect player seat!");
 
@@ -466,7 +466,7 @@ SpadesMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		case MessageChatMessage:
 		{
 			std::pair<MsgChatMessage, Array<char, 128>> msgChat =
-				player.OnMatchAwaitGameMessage<MsgChatMessage, MessageChatMessage, char, 128>();
+				player.OnMatchReadGameMessage<MsgChatMessage, MessageChatMessage, char, 128>();
 			if (msgChat.first.userID != player.GetID())
 				throw std::runtime_error("Spades::MsgChatMessage: Incorrect user ID!");
 

@@ -43,7 +43,7 @@ CheckersMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 			if (m_playersCheckedIn[player.m_seat])
 				break;
 
-			MsgCheckIn msgCheckIn = player.OnMatchAwaitGameMessage<MsgCheckIn, MessageCheckIn>();
+			MsgCheckIn msgCheckIn = player.OnMatchReadGameMessage<MsgCheckIn, MessageCheckIn>();
 			if (msgCheckIn.protocolSignature != XPCheckersProtocolSignature)
 				throw std::runtime_error("Checkers::MsgCheckIn: Invalid protocol signature!");
 			if (msgCheckIn.protocolVersion != (player.IsWinME() ? MECheckersProtocolVersion : XPCheckersProtocolVersion))
@@ -82,7 +82,7 @@ CheckersMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 					if (player.m_seat != m_playerTurn)
 						throw std::runtime_error("Checkers::MsgMovePiece: Not this player's turn!");
 
-					MsgMovePiece msgMovePiece = player.OnMatchAwaitGameMessage<MsgMovePiece, MessageMovePiece>();
+					MsgMovePiece msgMovePiece = player.OnMatchReadGameMessage<MsgMovePiece, MessageMovePiece>();
 					if (msgMovePiece.seat != player.m_seat)
 						throw std::runtime_error("Checkers::MsgMovePiece: Incorrect player seat!");
 
@@ -96,7 +96,7 @@ CheckersMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 					if (m_playerResigned != -1)
 						throw std::runtime_error("Checkers::MsgFinishMove: Player has resigned!");
 
-					MsgFinishMove msgFinishMove = player.OnMatchAwaitGameMessage<MsgFinishMove, MessageFinishMove>();
+					MsgFinishMove msgFinishMove = player.OnMatchReadGameMessage<MsgFinishMove, MessageFinishMove>();
 					if (msgFinishMove.seat != player.m_seat)
 						throw std::runtime_error("Checkers::MsgFinishMove: Incorrect player seat!");
 					if (msgFinishMove.drawSeat != -1)
@@ -123,7 +123,7 @@ CheckersMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 					if (m_playerResigned != -1)
 						throw std::runtime_error("Checkers::MsgDrawResponse: Player has resigned!");
 
-					MsgDrawResponse msgDrawResponse = player.OnMatchAwaitGameMessage<MsgDrawResponse, MessageDrawResponse>();
+					MsgDrawResponse msgDrawResponse = player.OnMatchReadGameMessage<MsgDrawResponse, MessageDrawResponse>();
 					if (msgDrawResponse.seat != player.m_seat)
 						throw std::runtime_error("Checkers::MsgDrawResponse: Incorrect player seat!");
 					if (msgDrawResponse.seat != XPCheckersInvertSeat(m_drawOfferedBy))
@@ -144,7 +144,7 @@ CheckersMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 					if (m_playerResigned != -1)
 						throw std::runtime_error("Checkers::MsgEndGame: Player has resigned!");
 
-					MsgEndGame msgEndGame = player.OnMatchAwaitGameMessage<MsgEndGame, MessageEndGame>();
+					MsgEndGame msgEndGame = player.OnMatchReadGameMessage<MsgEndGame, MessageEndGame>();
 					if (msgEndGame.seat != player.m_seat)
 						throw std::runtime_error("Checkers::MsgEndGame: Incorrect player seat!");
 					if (m_drawAccepted && msgEndGame.flags != MsgEndGame::FLAG_DRAW)
@@ -161,7 +161,7 @@ CheckersMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 					if (!XPCheckersIsSeatHost(player.m_seat))
 						throw std::runtime_error("Checkers::MsgEndMatch: Only the host (seat 0) can send this message!");
 
-					MsgEndMatch msgEndMatch = player.OnMatchAwaitGameMessage<MsgEndMatch, MessageEndMatch>();
+					MsgEndMatch msgEndMatch = player.OnMatchReadGameMessage<MsgEndMatch, MessageEndMatch>();
 					if (msgEndMatch.seatLost < 0 || msgEndMatch.seatLost > 2)
 						throw std::runtime_error("Checkers::MsgEndMatch: Invalid lost seat!");
 					if (m_drawAccepted && (msgEndMatch.reason != MsgEndMatch::REASON_GAMEOVER || msgEndMatch.seatLost != 2))
@@ -182,7 +182,7 @@ CheckersMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		{
 			if (type == MessageCheckIn)
 			{
-				MsgCheckIn msgCheckIn = player.OnMatchAwaitGameMessage<MsgCheckIn, MessageCheckIn>();
+				MsgCheckIn msgCheckIn = player.OnMatchReadGameMessage<MsgCheckIn, MessageCheckIn>();
 				if (player.IsWinME())
 				{
 					// msgCheckIn.protocolSignature should be undefined
@@ -228,7 +228,7 @@ CheckersMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 		case MessageChatMessage:
 		{
 			std::pair<MsgChatMessage, Array<char, 128>> msgChat =
-				player.OnMatchAwaitGameMessage<MsgChatMessage, MessageChatMessage, char, 128>();
+				player.OnMatchReadGameMessage<MsgChatMessage, MessageChatMessage, char, 128>();
 			if (msgChat.first.seat != player.m_seat)
 				throw std::runtime_error("Checkers::MsgChatMessage: Incorrect player seat!");
 
