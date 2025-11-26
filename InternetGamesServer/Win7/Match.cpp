@@ -159,43 +159,49 @@ Match::DisconnectedPlayer(PlayerSocket& player)
 		default:
 			throw MutexError("Win7::Match::DisconnectedPlayer(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
 	}
-
-	RemovePlayer(player);
-
-	// End the match on no players, marking it as to-be-removed from MatchManager
-	if (m_players.empty())
+	try
 	{
-		m_state = STATE_ENDED;
-	}
-	// Originally, servers replaced players who have left the game with computer (AI) players.
-	// Based on the game, either replace with computer player, or end the game directly by disconnecting everyone.
-	else if (m_state == STATE_PLAYING)
-	{
-		if ((g_config.allowSinglePlayer || m_players.size() > 1) && SupportsComputerPlayers())
+		RemovePlayer(player);
+
+		// End the match on no players, marking it as to-be-removed from MatchManager
+		if (m_players.empty())
 		{
-			const std::string replaceWithAIXML =
-				StateSTag::ConstructMethodMessage("GameManagement", "ReplaceWithAI",
-					std::to_string(player.m_role) + ",");
-			for (PlayerSocket* p : m_players)
-				p->OnEventReceive(replaceWithAIXML);
-
-			m_playerSeatsComputer[player.m_role] = true;
-
-			OnReplacePlayer(player);
-		}
-#if not MATCH_NO_DISCONNECT_ON_PLAYER_LEAVE
-		else
-		{
-			// Disconnect any remaining players
-			for (PlayerSocket* p : m_players)
-				p->OnMatchDisconnect();
-			m_players.clear();
-
 			m_state = STATE_ENDED;
 		}
-#endif
-	}
+		// Originally, servers replaced players who have left the game with computer (AI) players.
+		// Based on the game, either replace with computer player, or end the game directly by disconnecting everyone.
+		else if (m_state == STATE_PLAYING)
+		{
+			if ((g_config.allowSinglePlayer || m_players.size() > 1) && SupportsComputerPlayers())
+			{
+				const std::string replaceWithAIXML =
+					StateSTag::ConstructMethodMessage("GameManagement", "ReplaceWithAI",
+						std::to_string(player.m_role) + ",");
+				for (PlayerSocket* p : m_players)
+					p->OnEventReceive(replaceWithAIXML);
 
+				m_playerSeatsComputer[player.m_role] = true;
+
+				OnReplacePlayer(player);
+			}
+#if not MATCH_NO_DISCONNECT_ON_PLAYER_LEAVE
+			else
+			{
+				// Disconnect any remaining players
+				for (PlayerSocket* p : m_players)
+					p->OnMatchDisconnect();
+				m_players.clear();
+
+				m_state = STATE_ENDED;
+			}
+#endif
+		}
+	}
+	catch (...)
+	{
+		ReleaseMutex(m_mutex);
+		throw;
+	}
 	if (!ReleaseMutex(m_mutex))
 		throw MutexError("Win7::Match::JoinPlayer(): Couldn't release mutex: " + std::to_string(GetLastError()));
 }
@@ -208,23 +214,44 @@ Match::Update()
 	{
 		case STATE_WAITINGFORPLAYERS:
 		{
-			// Start the game, if all players are waiting for opponents
-			if (m_players.size() == GetRequiredPlayerCount() &&
-				std::all_of(m_players.begin(), m_players.end(),
-					[](const auto& player) { return player->GetState() == PlayerSocket::STATE_WAITINGFOROPPONENTS; }))
+			switch (WaitForSingleObject(m_mutex, MATCH_MUTEX_TIMEOUT_MS))
 			{
-				// Distribute unique role IDs for each player, starting from 0
-				const int playerCount = static_cast<int>(m_players.size());
-				const std::vector<int> roles = GenerateUniqueRandomNums(0, playerCount - 1);
-				for (int i = 0; i < playerCount; i++)
-					const_cast<int8_t&>(m_players[i]->m_role) = static_cast<int8_t>(roles[i]);
-
-				for (PlayerSocket* p : m_players)
-					p->OnGameStart();
-
-				SessionLog() << "[MATCH] " << m_guid << ": Started match!" << std::endl;
-				m_state = STATE_PLAYING;
+				case WAIT_OBJECT_0: // Acquired ownership of the mutex
+					break;
+				case WAIT_TIMEOUT:
+					throw MutexError("Win7::Match::Update(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
+				case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
+					throw MutexError("Win7::Match::Update(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
+				default:
+					throw MutexError("Win7::Match::Update(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
 			}
+			try
+			{
+				// Start the game, if all players are waiting for opponents
+				if (m_players.size() == GetRequiredPlayerCount() &&
+					std::all_of(m_players.begin(), m_players.end(),
+						[](const auto& player) { return player->GetState() == PlayerSocket::STATE_WAITINGFOROPPONENTS; }))
+				{
+					// Distribute unique role IDs for each player, starting from 0
+					const int playerCount = static_cast<int>(m_players.size());
+					const std::vector<int> roles = GenerateUniqueRandomNums(0, playerCount - 1);
+					for (int i = 0; i < playerCount; i++)
+						const_cast<int8_t&>(m_players[i]->m_role) = static_cast<int8_t>(roles[i]);
+
+					for (PlayerSocket* p : m_players)
+						p->OnGameStart();
+
+					SessionLog() << "[MATCH] " << m_guid << ": Started match!" << std::endl;
+					m_state = STATE_PLAYING;
+				}
+			}
+			catch (...)
+			{
+				ReleaseMutex(m_mutex);
+				throw;
+			}
+			if (!ReleaseMutex(m_mutex))
+				throw MutexError("Win7::Match::Update(): Couldn't release mutex: " + std::to_string(GetLastError()));
 			break;
 		}
 		case STATE_GAMEOVER:
