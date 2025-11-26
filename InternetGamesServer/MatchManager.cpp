@@ -242,8 +242,24 @@ MatchManager::DestroyMatch(unsigned int index)
 Win7::Match*
 MatchManager::FindLobby(Win7::PlayerSocket& player)
 {
+	switch (WaitForSingleObject(m_mutex, MATCH_MUTEX_TIMEOUT_MS))
+	{
+		case WAIT_OBJECT_0: // Acquired ownership of the mutex
+			break;
+		case WAIT_TIMEOUT:
+			throw MutexError("MatchManager::FindLobby(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
+		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
+			throw MutexError("MatchManager::FindLobby(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
+		default:
+			throw MutexError("MatchManager::FindLobby(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
+	}
+
 	if (player.GetLevel() == Win7::Match::Level::INVALID)
+	{
+		if (!ReleaseMutex(m_mutex))
+			throw MutexError("MatchManager::FindLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
 		throw std::runtime_error("Cannot find lobby for Windows 7 player: Invalid level!");
+	}
 
 	Win7::Match* targetMatch = nullptr;
 	for (const auto& match : m_matches_win7)
@@ -262,6 +278,9 @@ MatchManager::FindLobby(Win7::PlayerSocket& player)
 		SessionLog() << "[MATCH MANAGER] Added " << player.GetAddress()
 			<< " to existing Windows 7 " << Win7::Match::GameToNameString(targetMatch->GetGame())
 			<< " match " << targetMatch->GetGUID() << '.' << std::endl;
+
+		if (!ReleaseMutex(m_mutex))
+			throw MutexError("MatchManager::FindLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
 		return targetMatch;
 	}
 
@@ -270,14 +289,33 @@ MatchManager::FindLobby(Win7::PlayerSocket& player)
 	SessionLog() << "[MATCH MANAGER] Added " << player.GetAddress()
 		<< " to new Windows 7 " << Win7::Match::GameToNameString(match->GetGame())
 		<< " match " << match->GetGUID() << '.' << std::endl;
+
+	if (!ReleaseMutex(m_mutex))
+		throw MutexError("MatchManager::FindLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
 	return match;
 }
 
 WinXP::Match*
 MatchManager::FindLobby(WinXP::PlayerSocket& player)
 {
+	switch (WaitForSingleObject(m_mutex, MATCH_MUTEX_TIMEOUT_MS))
+	{
+		case WAIT_OBJECT_0: // Acquired ownership of the mutex
+			break;
+		case WAIT_TIMEOUT:
+			throw MutexError("MatchManager::FindLobby(): Timed out waiting for mutex: " + std::to_string(GetLastError()));
+		case WAIT_ABANDONED: // Acquired ownership of an abandoned mutex
+			throw MutexError("MatchManager::FindLobby(): Got ownership of an abandoned mutex: " + std::to_string(GetLastError()));
+		default:
+			throw MutexError("MatchManager::FindLobby(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
+	}
+
 	if (player.GetSkillLevel() == WinXP::Match::SkillLevel::INVALID)
+	{
+		if (!ReleaseMutex(m_mutex))
+			throw MutexError("MatchManager::FindLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
 		throw std::runtime_error("Cannot find lobby for Windows XP player: Invalid skill level!");
+	}
 
 	WinXP::Match* targetMatch = nullptr;
 	for (const auto& match : m_matches_winxp)
@@ -296,6 +334,9 @@ MatchManager::FindLobby(WinXP::PlayerSocket& player)
 		SessionLog() << "[MATCH MANAGER] Added " << player.GetAddress()
 			<< " to existing Windows XP " << WinXP::Match::GameToNameString(targetMatch->GetGame())
 			<< " match " << targetMatch->GetGUID() << '.' << std::endl;
+
+		if (!ReleaseMutex(m_mutex))
+			throw MutexError("MatchManager::FindLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
 		return targetMatch;
 	}
 
@@ -304,6 +345,9 @@ MatchManager::FindLobby(WinXP::PlayerSocket& player)
 	SessionLog() << "[MATCH MANAGER] Added " << player.GetAddress()
 		<< " to new Windows XP " << WinXP::Match::GameToNameString(match->GetGame())
 		<< " match " << match->GetGUID() << '.' << std::endl;
+
+	if (!ReleaseMutex(m_mutex))
+		throw MutexError("MatchManager::FindLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
 	return match;
 }
 
@@ -338,12 +382,17 @@ MatchManager::CreateLobby(Win7::PlayerSocket& player)
 			break;
 
 		default:
+		{
+			if (!ReleaseMutex(m_mutex))
+				throw MutexError("MatchManager::CreateLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
 			throw std::runtime_error("Cannot create lobby for Windows 7 player: Invalid game type!");
+		}
 	}
 
+	Win7::Match* targetMatch = m_matches_win7.back().get();
 	if (!ReleaseMutex(m_mutex))
 		throw MutexError("MatchManager::CreateLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
-	return m_matches_win7.back().get();
+	return targetMatch;
 }
 
 WinXP::Match*
@@ -384,10 +433,15 @@ MatchManager::CreateLobby(WinXP::PlayerSocket& player)
 			break;
 
 		default:
+		{
+			if (!ReleaseMutex(m_mutex))
+				throw MutexError("MatchManager::CreateLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
 			throw std::runtime_error("Cannot create lobby for Windows XP player: Invalid game type!");
+		}
 	}
 
+	WinXP::Match* targetMatch = m_matches_winxp.back().get();
 	if (!ReleaseMutex(m_mutex))
 		throw MutexError("MatchManager::CreateLobby(): Couldn't release mutex: " + std::to_string(GetLastError()));
-	return m_matches_winxp.back().get();
+	return targetMatch;
 }
