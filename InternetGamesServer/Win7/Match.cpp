@@ -280,22 +280,30 @@ Match::EventSend(const PlayerSocket& caller, const std::string& xml)
 		default:
 			throw MutexError("Win7::Match::EventSend(): An error occured waiting for mutex: " + std::to_string(GetLastError()));
 	}
-	const std::vector<QueuedEvent> events = ProcessEvent(*elEvent, caller);
-	for (const QueuedEvent& ev : events)
+	try
 	{
-		if (!ev.xml.empty())
+		const std::vector<QueuedEvent> events = ProcessEvent(*elEvent, caller);
+		for (const QueuedEvent& ev : events)
 		{
-			const bool includeSender = ev.includeSender && ev.xmlSender.empty();
-			for (const PlayerSocket* p : m_players)
+			if (!ev.xml.empty())
 			{
-				if (includeSender || p != &caller)
-					p->OnEventReceive(ev.xml);
+				const bool includeSender = ev.includeSender && ev.xmlSender.empty();
+				for (const PlayerSocket* p : m_players)
+				{
+					if (includeSender || p != &caller)
+						p->OnEventReceive(ev.xml);
+				}
+			}
+			if (!ev.xmlSender.empty())
+			{
+				caller.OnEventReceive(ev.xmlSender);
 			}
 		}
-		if (!ev.xmlSender.empty())
-		{
-			caller.OnEventReceive(ev.xmlSender);
-		}
+	}
+	catch (...)
+	{
+		ReleaseMutex(m_mutex);
+		throw;
 	}
 	if (!ReleaseMutex(m_mutex))
 		throw MutexError("Win7::Match::EventSend(): Couldn't release mutex: " + std::to_string(GetLastError()));
