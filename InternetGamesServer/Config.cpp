@@ -15,6 +15,7 @@ Config::Config() :
 	port(DEFAULT_PORT),
 	logsDirectory(DEFAULT_LOGS_DIRECTORY),
 	numConnectionsPerIP(0),
+	enableHTTP(false),
 	skipLevelMatching(false),
 	allowSinglePlayer(true),
 	disableXPAdBanner(false),
@@ -76,6 +77,11 @@ Config::Load(const std::string& file)
 		}
 	}
 	{
+		tinyxml2::XMLElement* elEnableHTTP = elRoot->FirstChildElement("EnableHTTP");
+		if (elEnableHTTP && elEnableHTTP->GetText())
+			enableHTTP = *elEnableHTTP->GetText() == '1';
+	}
+	{
 		tinyxml2::XMLElement* elSkipLevelMatching = elRoot->FirstChildElement("SkipLevelMatching");
 		if (elSkipLevelMatching && elSkipLevelMatching->GetText())
 			skipLevelMatching = *elSkipLevelMatching->GetText() == '1';
@@ -115,6 +121,7 @@ Config::Save()
 	NewElementWithText(elRoot, "Port", port);
 	NewElementWithText(elRoot, "LogsDirectory", logsDirectory.c_str());
 	NewElementWithText(elRoot, "NumConnectionsPerIP", numConnectionsPerIP);
+	NewElementWithText(elRoot, "EnableHTTP", enableHTTP ? "1" : "0");
 	NewElementWithText(elRoot, "SkipLevelMatching", skipLevelMatching ? "1" : "0");
 	NewElementWithText(elRoot, "AllowSinglePlayer", allowSinglePlayer ? "1" : "0");
 	NewElementWithText(elRoot, "DisableXPAdBanner", disableXPAdBanner ? "1" : "0");
@@ -136,6 +143,7 @@ const std::initializer_list<std::pair<std::string, std::string>> Config::s_optio
 	{ "port", "The port the server should be hosted on. Requires restart to apply. (Default: 28805)" },
 	{ "logdir", "The directory where log files are written to. Set to 0 to disable logging. Requires restart to fully apply. (Default: \"InternetGamesServer_logs\")" },
 	{ "numconnsip", "Limits the number of connections allowed from a given IP address. Maximum is 65535. 0 signifies no limit. NOTE: Make this 0 or higher than 1 to keep XP ad banner functionality! (Default: 0)" },
+	{ "enablehttp", "Create an HTTP server on startup (port 80). Only serves a root HTML page, which contains a table with the amount of waiting lobbies. Requires restart to apply. (Default: 0)" },
 	{ "skiplevel", "Do not match players in matches based on skill level. Value can only be 0 or 1. (Default: 0)" },
 	{ "singleplayer", "Allow matches, which support computer players, to exist with only one real player. (Default: 1)" },
 	{ "disablead", "Prevent the server from responding to ad banner requests from Windows XP games with a custom \"Powered by ZoneInternetGamesServer\" banner. Value can only be 0 or 1. (Default: 0)" }
@@ -150,6 +158,8 @@ Config::GetValue(const std::string& key) const
 		return logsDirectory;
 	if (key == "numconnsip")
 		return std::to_string(numConnectionsPerIP);
+	if (key == "enablehttp")
+		return enableHTTP ? "1" : "0";
 	if (key == "skiplevel")
 		return skipLevelMatching ? "1" : "0";
 	if (key == "singleplayer")
@@ -196,6 +206,8 @@ Config::SetValue(const std::string& key, const std::string& value)
 			throw std::runtime_error("Invalid \"numconnsip\" number: " + std::string(err.what()));
 		}
 	}
+	else if (key == "enablehttp")
+		CONFIG_SET_BOOL_VALUE(enableHTTP);
 	else if (key == "skiplevel")
 		CONFIG_SET_BOOL_VALUE(skipLevelMatching);
 	else if (key == "singleplayer")

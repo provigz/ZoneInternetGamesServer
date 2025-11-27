@@ -111,7 +111,7 @@ Socket::SocketHandler(void* socket_)
 					throw std::runtime_error("Invalid WinXP initial message!");
 				}
 			}
-			else if (!strncmp("GET /windows/ad.asp", receivedBuf, strlen("GET /windows/ad.asp"))) // WINXP: Banner ad request
+			else if (!strncmp("GET /windows/ad.asp HTTP/1.", receivedBuf, strlen("GET /windows/ad.asp"))) // WINXP: Banner ad request
 			{
 				socket.m_type = WINXP_BANNER_AD_REQUEST;
 
@@ -122,16 +122,16 @@ Socket::SocketHandler(void* socket_)
 				// The banner.png image will be returned by this server later. Look for it on the same host using '/', so that browsers can display it too (useful for testing).
 				// We link to the GitHub repository on the Wayback Machine, as it can be somewhat loaded in IE6 via HTTP (ads strictly open with IE).
 				const std::string adHtml = R"(
-					<HTML>
-						<HEAD></HEAD>
-						<BODY MARGINWIDTH="0" MARGINHEIGHT="0" TOPMARGIN="0" LEFTMARGIN="0" BGCOLOR="#FFFFFF">
-							<A HREF="http://web.archive.org/web/2/https://github.com/provigz/ZoneInternetGamesServer" TARGET="_new">
-								<IMG SRC="/banner.png" ALT="Powered by ZoneInternetGamesServer" BORDER=0 WIDTH=380 HEIGHT=200>
-							</A>
-							<ZONEAD></ZONEAD>
-						</BODY>
-					</HTML>
-					)";
+<HTML>
+	<HEAD></HEAD>
+	<BODY MARGINWIDTH="0" MARGINHEIGHT="0" TOPMARGIN="0" LEFTMARGIN="0" BGCOLOR="#FFFFFF">
+		<A HREF="http://web.archive.org/web/2/https://github.com/provigz/ZoneInternetGamesServer" TARGET="_new">
+			<IMG SRC="/banner.png" ALT="Powered by ZoneInternetGamesServer" BORDER=0 WIDTH=380 HEIGHT=200>
+		</A>
+		<ZONEAD></ZONEAD>
+	</BODY>
+</HTML>
+)";
 				const std::string adHttpHeader =
 					"HTTP/1.1 200 OK\r\n"
 					"Content-Type: text/html; charset=UTF-8\r\n"
@@ -143,7 +143,7 @@ Socket::SocketHandler(void* socket_)
 
 				throw DisconnectSocket("Banner ad sent over.");
 			}
-			else if (!strncmp("GET /banner.png", receivedBuf, strlen("GET /banner.png"))) // WINXP: Banner ad image request
+			else if (!strncmp("GET /banner.png HTTP/1.", receivedBuf, strlen("GET /banner.png"))) // WINXP: Banner ad image request
 			{
 				socket.m_type = WINXP_BANNER_AD_IMAGE_REQUEST;
 

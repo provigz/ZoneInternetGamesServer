@@ -27,6 +27,7 @@ public:
 	std::string logsDirectory;
 
 	USHORT numConnectionsPerIP;
+	bool enableHTTP;
 
 	bool skipLevelMatching; // When searching for a lobby, don't take the match level into account.
 	bool allowSinglePlayer; // Allow matches, which support computer players, to exist with only one real player.

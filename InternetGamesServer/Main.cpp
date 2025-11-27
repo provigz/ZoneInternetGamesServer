@@ -12,6 +12,7 @@
 #include "Config.hpp"
 #include "MatchManager.hpp"
 #include "Socket.hpp"
+#include "SocketHttp.hpp"
 #include "Util.hpp"
 
 #define DEFAULT_CONFIG_FILE "InternetGamesServer.config"
@@ -112,8 +113,11 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	struct addrinfo* result = NULL, * ptr = NULL, hints;
+	// If enabled, set up a simple HTTP server on port 80
+	if (g_config.enableHTTP)
+		SetUpSocketHTTP();
 
+	struct addrinfo* result = NULL, * ptr = NULL, hints;
 	ZeroMemory(&hints, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;

@@ -153,6 +153,7 @@
   <ItemGroup>
     <ClCompile Include="Command.cpp" />
     <ClCompile Include="Config.cpp" />
+    <ClCompile Include="SocketHttp.cpp" />
     <ClCompile Include="Win7\BackgammonMatch.cpp" />
     <ClCompile Include="Win7\CheckersMatch.cpp" />
     <ClCompile Include="external\tinyxml2\tinyxml2.cpp" />
@@ -179,6 +180,7 @@
     <ClInclude Include="Command.hpp" />
     <ClInclude Include="Config.hpp" />
     <ClInclude Include="Match.hpp" />
+    <ClInclude Include="SocketHttp.hpp" />
     <ClInclude Include="Win7\BackgammonMatch.hpp" />
     <ClInclude Include="Win7\CheckersMatch.hpp" />
     <ClInclude Include="Win7\Match.hpp" />
