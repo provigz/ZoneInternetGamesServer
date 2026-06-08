@@ -2,6 +2,7 @@
 #include <windows.h>
 
 #include <Lmcons.h>
+#include <conio.h>
 #include <stdio.h>
 #include <string>
 #include <TlHelp32.h>
@@ -9,158 +10,201 @@
 
 #define DLL_FILE_PATH "InternetGamesClientDLL.dll"
 #define DLL_FILE_PATH_XP "InternetGamesClientDLL_XP.dll"
-#define DLL_FILE_PATH_RELATIVE
 
 /** Functions */
 #ifdef WIN_XP
-bool EnableDebugPrivileges();
+int EnableDebugPrivileges();
+DWORD* FindAllProcessIDs(int& outCount);
+#else
+#ifdef _WIN64
+DWORD* FindAllProcessIDs(int& outCount);
+#else
+DWORD* FindAllProcessIDs(bool procXP, int& outCount);
 #endif
-DWORD FindProcessID(const wchar_t* targetExecutable, const int repetitions);
+#endif
+void WaitForCloseInput();
 
 int wmain(int argc, wchar_t* argv[])
 {
-#ifdef WIN_XP
-    static const std::wstring targetExecutable = L"zClientm.exe";
-#else
-    std::wstring targetExecutable;
-#if !defined(_WIN64)
-    bool targetXP = false; // Target is a Windows XP Internet Game
-#endif
-#endif
-    int repetitions = 0;
+    system("cls"); // Clear the console screen
 
-    // Process arguments
-    for (int i = 1; i < argc; ++i)
-    {
-        if (!wcscmp(argv[i], L"-r") || !wcscmp(argv[i], L"--repeat"))
-        {
-            if (argc < i + 2)
-            {
-                printf("ERROR: Repetition count must be provided after \"-r\" or \"--repeat\"!\n");
-                return -1;
-            }
-            repetitions = wcstol(argv[++i], nullptr, 10);
-        }
+    printf("===================================================\n");
 #ifdef WIN_XP
-    }
+    printf("  WINDOWS XP/ME INTERNET GAMES DLL INJECTOR [x86]  \n");
 #else
-        else if (!wcscmp(argv[i], L"-b") || !wcscmp(argv[i], L"--backgammon"))
-        {
-            targetExecutable = L"bckgzm.exe";
-        }
-        else if (!wcscmp(argv[i], L"-c") || !wcscmp(argv[i], L"--checkers"))
-        {
-            targetExecutable = L"chkrzm.exe";
-        }
-        else if (!wcscmp(argv[i], L"-s") || !wcscmp(argv[i], L"--spades"))
-        {
-            targetExecutable = L"shvlzm.exe";
-        }
-#if !defined(_WIN64)
-        else if (!wcscmp(argv[i], L"-x") || !wcscmp(argv[i], L"--xp"))
-        {
-            targetExecutable = L"zClientm.exe";
-            targetXP = true;
-        }
-#endif
-    }
-    if (targetExecutable.empty())
-    {
 #ifdef _WIN64
-        printf("ERROR: Target game must be specified: \"-b\" (\"--backgammon\"), \"-c\" (\"--checkers\") or \"-s\" (\"--spades\")!\n");
+    printf("     WINDOWS INTERNET GAMES DLL INJECTOR [x64]     \n");
 #else
-        printf("ERROR: Target game must be specified: \"-b\" (\"--backgammon\"), \"-c\" (\"--checkers\"), \"-s\" (\"--spades\") or \"-x\" (\"--xp\")!\n");
+    printf("     WINDOWS INTERNET GAMES DLL INJECTOR [x86]     \n");
 #endif
-        return -1;
-    }
 #endif
+    printf("===================================================\n\n");
 
 #ifdef WIN_XP
     // Enable debug privileges (required for Windows XP/2000)
-    if (!EnableDebugPrivileges())
-        return -2;
+    const int dbgPrivResult = EnableDebugPrivileges();
+    if (dbgPrivResult < 0)
+    {
+        WaitForCloseInput();
+        return dbgPrivResult;
+    }
 #endif
 
-    // Get process ID of target executable
-    const DWORD processID = FindProcessID(targetExecutable.c_str(), repetitions);
-    if (!processID)
-    {
-        printf("ERROR: Couldn't find process ID for target executable \"%S\"!\n", targetExecutable.c_str());
-        return 1;
-    }
+    bool errorOccurred = false;
 
-    // Get a handle to the process
-    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, TRUE, processID);
-
-    // Determine full DLL file path
-#ifdef DLL_FILE_PATH_RELATIVE
+    // Determine full DLL file path and get process IDs of target executables
+    int procCount;
     CHAR currentDir[MAX_PATH];
     GetCurrentDirectoryA(MAX_PATH, currentDir);
 #ifdef WIN_XP
     const std::string dllPath = std::string(currentDir) + '\\' + DLL_FILE_PATH_XP;
+    const size_t dllPathSize = dllPath.length();
+
+    const DWORD* procIDs = FindAllProcessIDs(procCount);
+    if (!procIDs)
+    {
+        printf("ERROR: Couldn't find any running Windows XP/ME Internet Games!\n");
+        WaitForCloseInput();
+        return 1;
+    }
 #else
 #ifdef _WIN64
     const std::string dllPath = std::string(currentDir) + '\\' + DLL_FILE_PATH;
-#else
-    const std::string dllPath = std::string(currentDir) + '\\' + (targetXP ? DLL_FILE_PATH_XP : DLL_FILE_PATH);
-#endif
-#endif
-#else
-#ifdef WIN_XP
-    const std::string dllPath = DLL_FILE_PATH_XP;
-#else
-#ifdef _WIN64
-    const std::string dllPath = DLL_FILE_PATH;
-#else
-    const std::string dllPath = targetXP ? DLL_FILE_PATH_XP : DLL_FILE_PATH;
-#endif
-#endif
-#endif
     const size_t dllPathSize = dllPath.length();
 
-    // Write full DLL file path to target process memory
-    LPVOID filePathAddress = VirtualAllocEx(hProcess, NULL, dllPathSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    if (!filePathAddress)
+    const DWORD* procIDs = FindAllProcessIDs(procCount);
+    if (!procIDs)
     {
-        printf("Couldn't allocate memory for DLL file path in target process memory: %X\n", GetLastError());
-        return 2;
+        printf("ERROR: Couldn't find any running Windows 7 Internet Games!\n");
+        WaitForCloseInput();
+        return 1;
     }
-    if (!WriteProcessMemory(hProcess, filePathAddress, dllPath.c_str(), dllPathSize, NULL))
+#else
+    const std::string dllPath = std::string(currentDir) + '\\' + DLL_FILE_PATH;
+    const std::string dllPathXP = std::string(currentDir) + '\\' + DLL_FILE_PATH_XP;
+    const size_t dllPathSize = dllPath.length();
+    const size_t dllPathXPSize = dllPathXP.length();
+
+    const DWORD* procIDs = FindAllProcessIDs(false, procCount);
+    int procCountXP;
+    const DWORD* procIDsXP = FindAllProcessIDs(true, procCountXP);
+    if (!procIDs && !procIDsXP)
     {
-        printf("Couldn't write DLL file path in target process memory: %X\n", GetLastError());
-        return 2;
+        printf("ERROR: Couldn't find any running Windows 7 or XP/ME Internet Games!\n");
+        WaitForCloseInput();
+        return 1;
     }
 
-    // Get the address of the "LoadLibraryA" function
-    HMODULE hKernel32DLL = GetModuleHandle(L"kernel32.dll");
-    if (!hKernel32DLL)
+    /* Go through all XP processes */
+    for (int procIdx = 0; procIdx < procCountXP; ++procIdx)
     {
-        printf("Couldn't get handle to \"kernel32.dll\": %X\n", GetLastError());
-        return 3;
-    }
-    LPVOID hLoadLibraryA = GetProcAddress(hKernel32DLL, "LoadLibraryA");
+        const DWORD procID = *(procIDsXP + procIdx);
 
-    // Create a thread in the target process to load the DLL
-    if (!CreateRemoteThread(hProcess, NULL, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(hLoadLibraryA), filePathAddress, 0, NULL))
+        // Get a handle to the process
+        HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, TRUE, procID);
+
+        // Write full DLL file path to target process memory
+        LPVOID filePathAddress = VirtualAllocEx(hProcess, NULL, dllPathXPSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+        if (!filePathAddress)
+        {
+            printf("ERROR: Process %d: Couldn't allocate memory for DLL file path in target process memory: %X\n", procID, GetLastError());
+            errorOccurred = true;
+            continue;
+        }
+        if (!WriteProcessMemory(hProcess, filePathAddress, dllPathXP.c_str(), dllPathXPSize, NULL))
+        {
+            printf("ERROR: Process %d: Couldn't write DLL file path in target process memory: %X\n", procID, GetLastError());
+            errorOccurred = true;
+            continue;
+        }
+
+        // Get the address of the "LoadLibraryA" function
+        HMODULE hKernel32DLL = GetModuleHandle(L"kernel32.dll");
+        if (!hKernel32DLL)
+        {
+            printf("ERROR: Process %d: Couldn't get handle to \"kernel32.dll\": %X\n", procID, GetLastError());
+            errorOccurred = true;
+            continue;
+        }
+        LPVOID hLoadLibraryA = GetProcAddress(hKernel32DLL, "LoadLibraryA");
+
+        // Create a thread in the target process to load the DLL
+        if (!CreateRemoteThread(hProcess, NULL, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(hLoadLibraryA), filePathAddress, 0, NULL))
+        {
+            printf("ERROR: Process %d: Creating a thread in the target process to load the DLL failed: %X\n", procID, GetLastError());
+            errorOccurred = true;
+            continue;
+        }
+    }
+    delete[] procIDsXP;
+#endif
+#endif
+
+    /* Go through all processes */
+    for (int procIdx = 0; procIdx < procCount; ++procIdx)
     {
-        printf("ERROR: Creating a thread in the target process to load the DLL failed: %X\n", GetLastError());
-        return 4;
-    }
+        const DWORD procID = *(procIDs + procIdx);
 
-    // DLL injection started successfully!
+        // Get a handle to the process
+        HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, TRUE, procID);
+
+        // Write full DLL file path to target process memory
+        LPVOID filePathAddress = VirtualAllocEx(hProcess, NULL, dllPathSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+        if (!filePathAddress)
+        {
+            printf("ERROR: Process %d: Couldn't allocate memory for DLL file path in target process memory: %X\n", procID, GetLastError());
+            errorOccurred = true;
+            continue;
+        }
+        if (!WriteProcessMemory(hProcess, filePathAddress, dllPath.c_str(), dllPathSize, NULL))
+        {
+            printf("ERROR: Process %d: Couldn't write DLL file path in target process memory: %X\n", procID, GetLastError());
+            errorOccurred = true;
+            continue;
+        }
+
+        // Get the address of the "LoadLibraryA" function
+        HMODULE hKernel32DLL = GetModuleHandle(L"kernel32.dll");
+        if (!hKernel32DLL)
+        {
+            printf("ERROR: Process %d: Couldn't get handle to \"kernel32.dll\": %X\n", procID, GetLastError());
+            errorOccurred = true;
+            continue;
+        }
+        LPVOID hLoadLibraryA = GetProcAddress(hKernel32DLL, "LoadLibraryA");
+
+        // Create a thread in the target process to load the DLL
+        if (!CreateRemoteThread(hProcess, NULL, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(hLoadLibraryA), filePathAddress, 0, NULL))
+        {
+            printf("ERROR: Process %d: Creating a thread in the target process to load the DLL failed: %X\n", procID, GetLastError());
+#ifndef WIN_XP
+#ifdef _WIN64
+            printf("CHECK: Does the architecture of this injector (x64/64-bit) match the architecture of the target game?\n\n");
+#else
+            printf("CHECK: Does the architecture of this injector (x86/32-bit) match the architecture of the target game?\n\n");
+#endif
+#endif
+            errorOccurred = true;
+            continue;
+        }
+    }
+    delete[] procIDs;
+
+    if (errorOccurred)
+        WaitForCloseInput();
     return 0;
 }
 
 /** Functions */
 
 #ifdef WIN_XP
-bool EnableDebugPrivileges()
+int EnableDebugPrivileges()
 {
     HANDLE hToken;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
     {
         printf("ERROR: Couldn't open token for current process!");
-        return false;
+        return -2;
     }
 
     TOKEN_PRIVILEGES tokenPriv;
@@ -173,38 +217,95 @@ bool EnableDebugPrivileges()
     if (!result)
     {
         printf("ERROR: Couldn't adjust privileges of process token!");
-        return false;
+        return -3;
     }
-    return true;
+    return 0;
 }
 #endif
 
-DWORD FindProcessID(const wchar_t* targetExecutable, const int repetitions)
+#ifdef WIN_XP
+DWORD* FindAllProcessIDs(int& outCount)
+#else
+#ifdef _WIN64
+DWORD* FindAllProcessIDs(int& outCount)
+#else
+DWORD* FindAllProcessIDs(bool procXP, int& outCount)
+#endif
+#endif
 {
-    // Get a snapshot of all running processes at this moment
-    HANDLE processSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    outCount = 0; // Initialize count to 0
 
-    // Get first process entry
+    HANDLE processSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (processSnap == INVALID_HANDLE_VALUE)
+        return nullptr;
+
     PROCESSENTRY32 processEntry;
     processEntry.dwSize = sizeof(PROCESSENTRY32);
-    if (!Process32First(processSnap, &processEntry))
-    {
-        CloseHandle(processSnap);
-        return FALSE;
-    }
 
-    // Iterate through process entries, looking for matching executable names, performing the required amount of repetitions
-    int repeatTimes = 0;
-    do
+    if (Process32First(processSnap, &processEntry))
     {
-        if (!wcscmp(processEntry.szExeFile, targetExecutable))
+        do
         {
-            repeatTimes++;
-            if (repeatTimes > repetitions)
-                return processEntry.th32ProcessID;
+#ifdef WIN_XP
+            if (!wcscmp(processEntry.szExeFile, L"zClientm.exe"))
+#else
+#ifdef _WIN64
+            if (!wcscmp(processEntry.szExeFile, L"bckgzm.exe") ||
+                !wcscmp(processEntry.szExeFile, L"chkrzm.exe") ||
+                !wcscmp(processEntry.szExeFile, L"shvlzm.exe"))
+#else
+            if (procXP ? (!wcscmp(processEntry.szExeFile, L"zClientm.exe"))
+                    : (!wcscmp(processEntry.szExeFile, L"bckgzm.exe") ||
+                        !wcscmp(processEntry.szExeFile, L"chkrzm.exe") ||
+                        !wcscmp(processEntry.szExeFile, L"shvlzm.exe")))
+#endif
+#endif
+            {
+                ++outCount;
+            }
         }
+        while (Process32Next(processSnap, &processEntry));
     }
-    while (Process32Next(processSnap, &processEntry));
+    CloseHandle(processSnap);
 
-    return FALSE;
-};
+    if (outCount == 0)
+        return nullptr;
+
+    DWORD* pidArray = new DWORD[outCount];
+    int pidIdx = -1;
+
+    processSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (Process32First(processSnap, &processEntry))
+    {
+        do
+        {
+#ifdef WIN_XP
+            if (!wcscmp(processEntry.szExeFile, L"zClientm.exe"))
+#else
+#ifdef _WIN64
+            if (!wcscmp(processEntry.szExeFile, L"bckgzm.exe") ||
+                !wcscmp(processEntry.szExeFile, L"chkrzm.exe") ||
+                !wcscmp(processEntry.szExeFile, L"shvlzm.exe"))
+#else
+            if (procXP ? (!wcscmp(processEntry.szExeFile, L"zClientm.exe"))
+                : (!wcscmp(processEntry.szExeFile, L"bckgzm.exe") ||
+                    !wcscmp(processEntry.szExeFile, L"chkrzm.exe") ||
+                    !wcscmp(processEntry.szExeFile, L"shvlzm.exe")))
+#endif
+#endif
+            {
+                pidArray[++pidIdx] = processEntry.th32ProcessID;
+            }
+        }
+        while (Process32Next(processSnap, &processEntry));
+    }
+    CloseHandle(processSnap);
+
+    return pidArray;
+}
+
+void WaitForCloseInput()
+{
+    printf("\nPress any key to close...");
+    _getch();
+}
