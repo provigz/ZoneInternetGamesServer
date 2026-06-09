@@ -128,6 +128,7 @@ Each game has custom messages, which are supported by the server in order for it
 ### Internet Games Client DLL + DLL Injector
 
 A DLL, which is to be injected into any of the games, using the DLL Injector application.
+The Injector goes through any running Internet Games on your system and injects the respective client DLL in each.
 
 Both applications have two variants for Windows 7 and Windows XP games. The Windows XP one is only available in x86 builds.
 
@@ -149,16 +150,12 @@ The Windows XP Client DLL performs the following operations:
 
 ## Building
 
-To build any of the projects, open up the respective project file (.vcxproj) in Visual Studio and build from there.
+To build the project, open the solution (.sln) in Visual Studio and build from there.
 
-### Running Multiple Instances
+## Guides
 
-For information on how to run multiple instances of any of the Internet Games, [read this](docs/MultipleInstances.md).
-
-#### Using DLL Injector on multiple instances
-
-Simply run it, as it goes through any processes of Internet Games on your system and injects the respective client DLL in each.
-As of v2.0, no further action is needed.
+* [Running multiple instances of an Internet Game (any version)](docs/MultipleInstances.md)
+* [Running Windows XP/ME Internet Games on later Windows versions](docs/LaterWindowsXPGamesSetup.md)
 
 ## Credits
 
