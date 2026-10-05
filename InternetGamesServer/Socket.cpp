@@ -379,7 +379,7 @@ Socket::Receive(char* buf, int len)
 		if (receivedLen > 0)
 			return receivedLen;
 		if (receivedLen == 0)
-			throw ClientDisconnected(0);
+			throw ClientDisconnected("Connection closed by client.");
 
 		throw std::runtime_error("\"recv\" failed: " + std::to_string(WSAGetLastError()));
 	}
@@ -415,7 +415,7 @@ Socket::Receive(char* buf, int len)
 					if (receivedLen > 0)
 						return receivedLen;
 					if (receivedLen == 0)
-						throw ClientDisconnected(0);
+						throw ClientDisconnected("Connection closed by client.");
 
 					const int err = WSAGetLastError();
 					if (err == WSAEWOULDBLOCK)
