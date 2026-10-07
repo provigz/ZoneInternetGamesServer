@@ -48,7 +48,9 @@ CheckersMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 				throw std::runtime_error("Checkers::MsgCheckIn: Invalid protocol signature!");
 			if (msgCheckIn.protocolVersion != (player.IsWinME() ? MECheckersProtocolVersion : XPCheckersProtocolVersion))
 				throw std::runtime_error("Checkers::MsgCheckIn: Incorrect protocol version!");
-			if (msgCheckIn.clientVersion != (player.IsWinME() ? MECheckersClientVersion : XPCheckersClientVersion))
+			if (player.IsWinME()
+					? msgCheckIn.clientVersion != MECheckersClientVersion1 && msgCheckIn.clientVersion != MECheckersClientVersion2
+					: msgCheckIn.clientVersion != XPCheckersClientVersion)
 				throw std::runtime_error("Checkers::MsgCheckIn: Incorrect client version!");
 			// msgCheckIn.playerID should be undefined
 			if (msgCheckIn.seat != player.m_seat)

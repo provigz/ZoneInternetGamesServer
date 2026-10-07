@@ -14,7 +14,8 @@ namespace Reversi {
 #define XPReversiClientVersion 0x00010204
 
 #define MEReversiProtocolVersion 0x00010204
-#define MEReversiClientVersion 0x0062F850
+#define MEReversiClientVersion1 0x0062F850
+#define MEReversiClientVersion2 0x001AF98C
 
 enum
 {
