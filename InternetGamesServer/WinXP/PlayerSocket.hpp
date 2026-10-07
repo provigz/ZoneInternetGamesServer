@@ -391,14 +391,12 @@ private:
 		assert(len % sizeof(uint32) == 0);
 
 		assert(m_proxyConnected);
+		assert(m_match);
 
 		MsgBaseApplication msgBaseApp;
 		msgBaseApp.signature = XPLobbyProtocolSignature;
 		msgBaseApp.messageType = MessageGameMessage;
 		msgBaseApp.dataLength = sizeof(MsgGameMessage) + len;
-
-		if (!m_match)
-			throw std::runtime_error("Tried sending game message without an active match!");
 
 		MsgGameMessage msgGameMessage;
 		msgGameMessage.gameID = m_match->GetGameID();
@@ -439,14 +437,12 @@ private:
 		static_assert(sizeof(T) % sizeof(uint32) == 0, "Size of T must be divisible by 4! Add STRUCT_PADDING at the end, if required.");
 
 		assert(m_proxyConnected);
+		assert(m_match);
 
 		MsgBaseApplication msgBaseApp;
 		msgBaseApp.signature = XPLobbyProtocolSignature;
 		msgBaseApp.messageType = MessageGameMessage;
 		msgBaseApp.dataLength = static_cast<uint32>(sizeof(MsgGameMessage) + AdjustedSize<T> + msgGameSecond.GetLength() * sizeof(M));
-
-		if (!m_match)
-			throw std::runtime_error("Tried sending game message without an active match!");
 
 		MsgGameMessage msgGameMessage;
 		msgGameMessage.gameID = m_match->GetGameID();
@@ -494,14 +490,12 @@ private:
 		static_assert(sizeof(T) % sizeof(uint32) == 0, "Size of T must be divisible by 4! Add STRUCT_PADDING at the end, if required.");
 
 		assert(m_proxyConnected);
+		assert(m_match);
 
 		MsgBaseApplication msgBaseApp;
 		msgBaseApp.signature = XPLobbyProtocolSignature;
 		msgBaseApp.messageType = MessageGameMessage;
 		msgBaseApp.dataLength = static_cast<uint32>(sizeof(MsgGameMessage) + AdjustedSize<T> + msgGameSecond.GetLength() * sizeof(M));
-
-		if (!m_match)
-			throw std::runtime_error("Tried sending game message without an active match!");
 
 		MsgGameMessage msgGameMessage;
 		msgGameMessage.gameID = m_match->GetGameID();
