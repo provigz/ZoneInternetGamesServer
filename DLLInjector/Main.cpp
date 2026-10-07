@@ -247,14 +247,16 @@ DWORD* FindAllProcessIDs(bool procXP, int& outCount)
         do
         {
 #ifdef WIN_XP
-            if (!wcscmp(processEntry.szExeFile, L"zClientm.exe"))
+            if (!wcscmp(processEntry.szExeFile, L"zClientm.exe") ||
+                !wcscmp(processEntry.szExeFile, L"ZCLIENTM.EXE")) // Named in uppercase in ME games
 #else
 #ifdef _WIN64
             if (!wcscmp(processEntry.szExeFile, L"bckgzm.exe") ||
                 !wcscmp(processEntry.szExeFile, L"chkrzm.exe") ||
                 !wcscmp(processEntry.szExeFile, L"shvlzm.exe"))
 #else
-            if (procXP ? (!wcscmp(processEntry.szExeFile, L"zClientm.exe"))
+            if (procXP ? (!wcscmp(processEntry.szExeFile, L"zClientm.exe") ||
+                        !wcscmp(processEntry.szExeFile, L"ZCLIENTM.EXE")) // Named in uppercase in ME games
                     : (!wcscmp(processEntry.szExeFile, L"bckgzm.exe") ||
                         !wcscmp(processEntry.szExeFile, L"chkrzm.exe") ||
                         !wcscmp(processEntry.szExeFile, L"shvlzm.exe")))
@@ -280,17 +282,19 @@ DWORD* FindAllProcessIDs(bool procXP, int& outCount)
         do
         {
 #ifdef WIN_XP
-            if (!wcscmp(processEntry.szExeFile, L"zClientm.exe"))
+            if (!wcscmp(processEntry.szExeFile, L"zClientm.exe") ||
+                !wcscmp(processEntry.szExeFile, L"ZCLIENTM.EXE")) // Named in uppercase in ME games
 #else
 #ifdef _WIN64
             if (!wcscmp(processEntry.szExeFile, L"bckgzm.exe") ||
                 !wcscmp(processEntry.szExeFile, L"chkrzm.exe") ||
                 !wcscmp(processEntry.szExeFile, L"shvlzm.exe"))
 #else
-            if (procXP ? (!wcscmp(processEntry.szExeFile, L"zClientm.exe"))
-                : (!wcscmp(processEntry.szExeFile, L"bckgzm.exe") ||
-                    !wcscmp(processEntry.szExeFile, L"chkrzm.exe") ||
-                    !wcscmp(processEntry.szExeFile, L"shvlzm.exe")))
+            if (procXP ? (!wcscmp(processEntry.szExeFile, L"zClientm.exe") ||
+                        !wcscmp(processEntry.szExeFile, L"ZCLIENTM.EXE")) // Named in uppercase in ME games
+                    : (!wcscmp(processEntry.szExeFile, L"bckgzm.exe") ||
+                        !wcscmp(processEntry.szExeFile, L"chkrzm.exe") ||
+                        !wcscmp(processEntry.szExeFile, L"shvlzm.exe")))
 #endif
 #endif
             {
