@@ -172,6 +172,9 @@ private:
 		const MsgBaseApplication& msgBaseApp = m_incomingGenericMsg.info;
 		const MsgGameMessage& msgGameMessage = m_incomingGameMsg.info;
 
+		if (!m_match)
+			throw std::runtime_error("Could not process game message without an active match!");
+
 		if (msgGameMessage.gameID != m_match->GetGameID())
 			throw std::runtime_error("MsgGameMessage: Incorrect game ID!");
 		if (msgGameMessage.type != Type)
@@ -210,6 +213,9 @@ private:
 		const MsgBaseGeneric& msgBaseGeneric = m_incomingGenericMsg.base;
 		const MsgBaseApplication& msgBaseApp = m_incomingGenericMsg.info;
 		const MsgGameMessage& msgGameMessage = m_incomingGameMsg.info;
+
+		if (!m_match)
+			throw std::runtime_error("Could not process game message without an active match!");
 
 		if (msgGameMessage.gameID != m_match->GetGameID())
 			throw std::runtime_error("MsgGameMessage: Incorrect game ID!");
@@ -262,6 +268,9 @@ private:
 		const MsgBaseGeneric& msgBaseGeneric = m_incomingGenericMsg.base;
 		const MsgBaseApplication& msgBaseApp = m_incomingGenericMsg.info;
 		const MsgGameMessage& msgGameMessage = m_incomingGameMsg.info;
+
+		if (!m_match)
+			throw std::runtime_error("Could not process game message without an active match!");
 
 		if (msgGameMessage.gameID != m_match->GetGameID())
 			throw std::runtime_error("MsgGameMessage: Incorrect game ID!");
@@ -388,6 +397,9 @@ private:
 		msgBaseApp.messageType = MessageGameMessage;
 		msgBaseApp.dataLength = sizeof(MsgGameMessage) + len;
 
+		if (!m_match)
+			throw std::runtime_error("Tried sending game message without an active match!");
+
 		MsgGameMessage msgGameMessage;
 		msgGameMessage.gameID = m_match->GetGameID();
 		msgGameMessage.type = Type;
@@ -432,6 +444,9 @@ private:
 		msgBaseApp.signature = XPLobbyProtocolSignature;
 		msgBaseApp.messageType = MessageGameMessage;
 		msgBaseApp.dataLength = static_cast<uint32>(sizeof(MsgGameMessage) + AdjustedSize<T> + msgGameSecond.GetLength() * sizeof(M));
+
+		if (!m_match)
+			throw std::runtime_error("Tried sending game message without an active match!");
 
 		MsgGameMessage msgGameMessage;
 		msgGameMessage.gameID = m_match->GetGameID();
@@ -484,6 +499,9 @@ private:
 		msgBaseApp.signature = XPLobbyProtocolSignature;
 		msgBaseApp.messageType = MessageGameMessage;
 		msgBaseApp.dataLength = static_cast<uint32>(sizeof(MsgGameMessage) + AdjustedSize<T> + msgGameSecond.GetLength() * sizeof(M));
+
+		if (!m_match)
+			throw std::runtime_error("Tried sending game message without an active match!");
 
 		MsgGameMessage msgGameMessage;
 		msgGameMessage.gameID = m_match->GetGameID();
