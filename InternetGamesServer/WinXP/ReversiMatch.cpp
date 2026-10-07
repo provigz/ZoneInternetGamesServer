@@ -42,10 +42,11 @@ ReversiMatch::ProcessIncomingGameMessageImpl(PlayerSocket& player, uint32 type)
 				throw std::runtime_error("Reversi::MsgCheckIn: Invalid protocol signature!");
 			if (msgCheckIn.protocolVersion != (player.IsWinME() ? MEReversiProtocolVersion : XPReversiProtocolVersion))
 				throw std::runtime_error("Reversi::MsgCheckIn: Incorrect protocol version!");
-			if (player.IsWinME()
-					? msgCheckIn.clientVersion != MEReversiClientVersion1 && msgCheckIn.clientVersion != MEReversiClientVersion2
-					: msgCheckIn.clientVersion != XPReversiClientVersion)
-				throw std::runtime_error("Reversi::MsgCheckIn: Incorrect client version!");
+			if (!player.IsWinME()) // Skip client version check for ME Reversi, as for some reason it's inconsistent across different Windows versions
+			{
+				if (msgCheckIn.clientVersion != XPReversiClientVersion)
+					throw std::runtime_error("Reversi::MsgCheckIn: Incorrect client version!");
+			}
 			// msgCheckIn.playerID should be undefined
 			if (msgCheckIn.seat != player.m_seat)
 				throw std::runtime_error("Reversi::MsgCheckIn: Incorrect player seat!");

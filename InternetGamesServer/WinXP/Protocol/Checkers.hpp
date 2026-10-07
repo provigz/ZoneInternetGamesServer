@@ -14,8 +14,6 @@ namespace Checkers {
 #define XPCheckersClientVersion 0x00010202
 
 #define MECheckersProtocolVersion 0x00010202
-#define MECheckersClientVersion1 0x0062F850
-#define MECheckersClientVersion2 0x001AF98C
 
 enum
 {
